@@ -1,0 +1,42 @@
+from enum import StrEnum
+
+
+class StudyStatus(StrEnum):
+    DRAFT = "DRAFT"
+    SCOPED = "SCOPED"
+    COLLECTING = "COLLECTING"
+    EVIDENCE_REVIEW = "EVIDENCE_REVIEW"
+    ARCHIVED = "ARCHIVED"
+
+
+class SourceStatus(StrEnum):
+    UPLOADED = "UPLOADED"
+    PROCESSING = "PROCESSING"
+    PROCESSED = "PROCESSED"
+    FAILED = "FAILED"
+
+
+class EvidenceReviewStatus(StrEnum):
+    PROPOSED = "PROPOSED"
+    REVIEWED = "REVIEWED"
+    REJECTED = "REJECTED"
+
+
+class RunStatus(StrEnum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    PARTIALLY_SUCCEEDED = "PARTIALLY_SUCCEEDED"
+    FAILED = "FAILED"
+    CANCELLED = "CANCELLED"
+
+
+class RunStepStatus(StrEnum):
+    PENDING = "PENDING"
+    READY = "READY"
+    RUNNING = "RUNNING"
+    WAITING_HUMAN = "WAITING_HUMAN"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"

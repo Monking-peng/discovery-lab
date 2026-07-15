@@ -1,0 +1,15 @@
+{
+  "schema_version": "bad-case.v1",
+  "id": "csv-trailing-blank-line",
+  "discovered_at": "2026-07-15T23:31:55+08:00",
+  "stage": "parse_source",
+  "severity": "medium",
+  "fixture": "fixtures/helphub/tickets.csv",
+  "symptom": "A valid spreadsheet export with a trailing blank physical row failed strict column validation.",
+  "safe_error_code": "invalid_source",
+  "root_cause": "The CSV parser counted an empty physical row as a logical evidence row and compared zero cells with the ten-column header.",
+  "resolution": "Ignore only fully blank physical rows while preserving strict validation for every non-empty row.",
+  "regression_test": "tests/ingestion/test_parsers.py::test_csv_parser_ignores_blank_physical_rows_but_keeps_logical_row_numbers",
+  "recovery_verified": true,
+  "data_loss": false
+}

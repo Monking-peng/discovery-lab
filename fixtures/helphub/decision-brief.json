@@ -1,0 +1,18 @@
+{
+  "name": "HelpHub Q4 AI direction",
+  "decision_question": "Which single AI capability should HelpHub validate for enterprise support teams next quarter?",
+  "target_cohort": "B2B support teams with 20+ agents and contractual SLAs",
+  "candidate_options": [
+    "AI auto-reply",
+    "automatic ticket classification",
+    "high-risk detection and assisted escalation"
+  ],
+  "constraints": [
+    "One product squad for eight weeks",
+    "No fully autonomous customer-facing response in the first experiment",
+    "Must preserve an auditable reason for every escalation"
+  ],
+  "success_metric": "Reduce severe SLA breaches without increasing false escalations above 15%",
+  "decision_deadline": "2026-08-15",
+  "synthetic": true
+}

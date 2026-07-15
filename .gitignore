@@ -1,0 +1,39 @@
+# Secrets and local overrides
+.env
+.env.*
+!.env.example
+
+# Project-local tools and caches
+.tools/
+.cache/
+.pnpm-store/
+
+# JavaScript / Next.js
+node_modules/
+.next/
+out/
+dist/
+coverage/
+playwright-report/
+test-results/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Local runtime data
+var/
+*.log
+
+# Editors / operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.tsbuildinfo

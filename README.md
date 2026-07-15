@@ -1,0 +1,125 @@
+# DiscoveryLab
+
+DiscoveryLab 是一个证据驱动的 AI 产品发现与决策工作台。它把访谈、工单、问卷、行为数据和竞品资料整理为可定位的原子证据，再形成支持与反对结论、产品机会、可证伪假设、实验、决策和带引用的 PRD。
+
+> 核心价值不是更快地产出文档，而是更可靠地改变判断。
+
+## 当前阶段
+
+项目已经通过第一阶段 Architecture Gate，并完成首个可演示纵向切片：**Source → Evidence → 原文回跳**。真实 UI、API、PostgreSQL、不可变 Blob、LangGraph、解析器、抽取器、引用校验与离线评测已经连通。
+
+实施仍受以下架构门禁约束：
+
+- 核心闭环、MVP 与非目标已经明确。
+- Source、Locator、Evidence、Claim 的版本与溯源规则已经明确。
+- LangGraph、后台 Worker 与 PostgreSQL 的职责边界已经明确。
+- Tool 权限、Human-in-the-loop 和外部写入审批已经明确。
+- Golden Dataset、Bad Case 与发布门禁已经明确。
+
+## 核心闭环
+
+```text
+资料
+→ 可定位原文
+→ 原子证据
+→ 支持/反对结论
+→ 产品机会
+→ 可证伪假设
+→ 实验
+→ 决策
+→ 带引用 PRD
+```
+
+## 技术策略
+
+- Next.js：产品界面。
+- FastAPI：业务 API 与控制平面。
+- Python Worker：解析、Embedding、批量抽取和异步任务。
+- PostgreSQL + pgvector：唯一业务事实源和混合检索。
+- Redis：任务投递与短期缓存，不保存权威状态。
+- 本地不可变 Blob 适配器 / S3 / R2：原始文件和网页快照；首期本地运行，线上无缝切换对象存储。
+- LangGraph：Agent Workflow、Checkpoint、暂停恢复与 HITL。
+- Langfuse + OpenTelemetry：模型和工具 Trace。
+- Typed Python Eval Runner + pytest：当前离线门禁；进入真实模型对比后再接 Promptfoo。
+- MCP SDK：把证据检索和决策查询暴露给外部 Agent。
+
+## 自研边界
+
+项目不会重复实现通用框架。重点自研：
+
+- Evidence–Claim–Decision 数据模型和来源谱系。
+- 支持证据、反面证据和覆盖缺口检索。
+- Prompt/Context 的版本化组装和可重放机制。
+- Discovery Workflow、工具权限和审批策略。
+- 产品发现专用的 Golden Dataset、评测器和 Bad Case 闭环。
+- Evidence Explorer、Claim Inspector、Run Inspector 和 Eval Center。
+
+## 架构文档
+
+- [产品定义](docs/product-definition.md)
+- [系统架构](docs/system-architecture.md)
+- [领域与数据模型](docs/domain-model.md)
+- [开发环境与工具准备](docs/development-environment.md)
+- [纵向切片 01：Source to Evidence](docs/vertical-slice-01.md)
+- [Evaluation 与 Bad Case 闭环](docs/evaluation-and-bad-cases.md)
+
+Agent Harness、评测与安全、实施路线图和 ADR 会伴随对应纵向切片固化，避免形成与真实代码脱节的“纸面架构”。
+
+## 能力落地状态
+
+| 能力 | 当前可运行内容 | 后续切片 |
+| --- | --- | --- |
+| Agent Workflow | LangGraph `parse → extract → verify`，三步 Run 可追踪 | HITL、暂停恢复、条件分支 |
+| Tool Calling | 当前图刻意不暴露副作用工具，注入文本不能触发动作 | Tool Registry、Policy、Approval |
+| Prompt / Context Engineering | OpenAI Responses 结构化输出、版本化 profile、上下文预算、untrusted data 边界 | Context Manifest 与对照实验 |
+| RAG | 数据模型与 pgvector 已准备 | 混合检索、反证检索、Claim Context |
+| Evaluation | 可执行 Golden Dataset，引用与 Locator 回放率作为发布门禁 | 模型语义质量、Claim/PRD 评测 |
+| Bad Case Analysis | 失败 Run、safe error、回归样本与根因记录 | UI Failure Inbox 与聚类 |
+| MCP | 架构与只读权限边界已定义 | Evidence/Decision MCP Server |
+| PRD | 领域模型与引用规则已定义 | Evidence → Claim → Decision → cited PRD |
+
+这张表区分“已经能现场演示”与“已经设计但尚未实现”，避免用静态页面冒充技术能力。
+
+## 本地运行
+
+首次准备依赖：
+
+```powershell
+.\scripts\bootstrap.ps1
+pnpm install --frozen-lockfile
+```
+
+启动数据库、执行迁移，并在后台启动 API 与 Web：
+
+```powershell
+.\scripts\dev.ps1 start
+```
+
+开发服务只会管理 `.cache/dev` 中记录的本项目进程；如果 3000 或 8000 端口已被其他程序占用，脚本会停止并提示，不会结束那个程序。常用管理命令：
+
+```powershell
+.\scripts\dev.ps1 status
+.\scripts\dev.ps1 logs
+.\scripts\dev.ps1 restart
+.\scripts\dev.ps1 stop
+```
+
+导入可重复运行的 HelpHub 演示 Study：
+
+```powershell
+.\scripts\seed-helphub.ps1
+```
+
+脚本通过真实 HTTP API 创建 Study、上传 Markdown/CSV、运行证据抽取，并抽查原文定位与哈希完整性。进度保存在 `.cache/helphub-seed.json`，中断后可直接重跑；如需创建一份全新的副本，使用 `-ForceNew`。
+
+运行离线 Golden Evaluation：
+
+```powershell
+.\scripts\eval.ps1
+```
+
+报告写入 `.cache/evals/source-to-evidence.json`。当前门禁覆盖精确引用、CSV 稳定行定位、多记录关系、prompt injection 控制面隔离和 Locator 回放；尚未进入 Claim 层的 insufficient-evidence case 会明确标成 `skipped`，不会伪装成通过。
+
+## 明确不做
+
+首版不做通用知识库、微服务、图数据库、连接器市场、多 Agent 自由辩论、企业级实时协作或自动路线图决策。MVP 用一个 HelpHub 种子 Study 做深，并主动展示脏数据、反面证据、权限、失败与恢复。

@@ -1,0 +1,12 @@
+{
+  "name": "discovery-lab-workspace",
+  "private": true,
+  "packageManager": "pnpm@11.7.0",
+  "scripts": {
+    "dev:web": "pnpm --dir apps/web dev",
+    "build:web": "pnpm --dir apps/web build",
+    "lint:web": "pnpm --dir apps/web lint",
+    "typecheck:web": "pnpm --dir apps/web typecheck",
+    "test:web": "pnpm --dir apps/web test"
+  }
+}
