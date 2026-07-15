@@ -30,7 +30,7 @@ export type InsightEvidenceEdge = {
   sourceId: string;
   sourceRevisionId: string;
   relation: InsightRelation;
-  relationOrigin: "derived-anchor" | "evidence-metadata";
+  relationOrigin: "derived-anchor" | "unverified-context";
   title: string;
   quote: string;
   sourceName: string;
@@ -245,8 +245,6 @@ function claimStatement(item: Evidence): string {
 
 function relationFor(item: Evidence, anchorId: string): InsightRelation {
   if (item.id === anchorId) return "supports";
-  if (item.kind === "counterevidence" || item.relationship === "challenges") return "challenges";
-  if (item.relationship === "supports") return "supports";
   return "contextualizes";
 }
 
@@ -377,7 +375,7 @@ export function deriveInsights(evidence: readonly Evidence[]): DerivedInsights {
         sourceId: item.sourceId,
         sourceRevisionId: item.sourceRevisionId,
         relation: relationFor(item, anchor.id),
-        relationOrigin: item.id === anchor.id ? "derived-anchor" : "evidence-metadata",
+        relationOrigin: item.id === anchor.id ? "derived-anchor" : "unverified-context",
         title: item.title,
         quote: item.quote,
         sourceName: item.sourceName,

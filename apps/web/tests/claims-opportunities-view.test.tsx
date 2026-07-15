@@ -88,6 +88,7 @@ describe("ClaimsOpportunitiesView", () => {
 
     expect(screen.getByText(originalQuote)).toHaveTextContent(originalQuote);
     expect(screen.getByRole("button", { name: "Open evidence" })).toBeVisible();
+    expect(screen.getAllByText("Onboarding")).toHaveLength(2);
 
     rerender(
       <ClaimsOpportunitiesView
@@ -99,6 +100,7 @@ describe("ClaimsOpportunitiesView", () => {
 
     expect(screen.getByText(originalQuote)).toHaveTextContent(originalQuote);
     expect(screen.getByRole("button", { name: "打开证据" })).toBeVisible();
+    expect(screen.getAllByText("上手引导")).toHaveLength(2);
     expect(screen.queryByRole("button", { name: "Open evidence" })).not.toBeInTheDocument();
   });
 });

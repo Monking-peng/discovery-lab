@@ -78,7 +78,7 @@ describe("deriveInsights", () => {
     );
   });
 
-  it("binds every claim edge to immutable evidence and source revisions", () => {
+  it("binds revisions without treating Evidence metadata as a Claim relationship", () => {
     const support = makeEvidence({
       id: "risk-support",
       revisionId: "risk-support-rev-4",
@@ -132,15 +132,15 @@ describe("deriveInsights", () => {
         sourceId: "interview-b",
         sourceRevisionId: "interview-b-rev-8",
         quote: challenge.quote,
-        relation: "challenges",
-        relationOrigin: "evidence-metadata",
+        relation: "contextualizes",
+        relationOrigin: "unverified-context",
       }),
     ]);
     expect(claim.strength).toMatchObject({
       evidenceCount: 2,
       supportingCount: 1,
-      challengingCount: 1,
-      contextualCount: 0,
+      challengingCount: 0,
+      contextualCount: 1,
       distinctSourceCount: 2,
       reviewedCount: 2,
     });
@@ -149,6 +149,7 @@ describe("deriveInsights", () => {
         { code: "semantic_support_unverified", severity: "warning" },
         { code: "cohort_coverage_unavailable", severity: "info" },
         { code: "insufficient_support", severity: "blocking", count: 1 },
+        { code: "counterevidence_missing", severity: "warning" },
       ]),
     );
     expect(result.opportunities).toEqual([

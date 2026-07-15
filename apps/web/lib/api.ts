@@ -80,6 +80,8 @@ export type ListResult<T> = {
 
 export type EvidenceContext = {
   evidenceId: string;
+  evidenceRevisionId?: string;
+  sourceRevisionId?: string;
   sourceName: string;
   locatorLabel: string;
   before: string;
@@ -370,8 +372,13 @@ export const api = {
     return { items: payload.items.map(normalizeRun), total: payload.total };
   },
 
-  async getEvidenceContext(evidenceId: string): Promise<EvidenceContext> {
-    const payload = await request<unknown>(`/v1/evidence/${encodeURIComponent(evidenceId)}/context`);
+  async getEvidenceContext(evidenceId: string, evidenceRevisionId?: string): Promise<EvidenceContext> {
+    const revisionQuery = evidenceRevisionId
+      ? `?evidence_revision_id=${encodeURIComponent(evidenceRevisionId)}`
+      : "";
+    const payload = await request<unknown>(
+      `/v1/evidence/${encodeURIComponent(evidenceId)}/context${revisionQuery}`,
+    );
     const item = isRecord(payload) && isRecord(payload.data) ? payload.data : isRecord(payload) ? payload : {};
     const integrity = isRecord(item.integrity) ? item.integrity : null;
     const source = isRecord(item.source) ? item.source : {};
@@ -386,6 +393,10 @@ export const api = {
     ));
     return {
       evidenceId: text(item.evidenceId, text(item.evidence_id, evidenceId)),
+      evidenceRevisionId:
+        text(evidence.evidenceRevisionId, text(evidence.evidence_revision_id)) || undefined,
+      sourceRevisionId:
+        text(source.sourceRevisionId, text(source.source_revision_id)) || undefined,
       sourceName: text(item.sourceName, text(item.source_name, "Unknown source")),
       locatorLabel: text(item.locatorLabel, text(item.locator_label, "Locator unavailable")),
       before: text(item.before),

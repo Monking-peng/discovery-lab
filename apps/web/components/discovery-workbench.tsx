@@ -298,7 +298,14 @@ export function DiscoveryWorkbench() {
     setContextError("");
     setLiveContext(null);
     try {
-      const value = await api.getEvidenceContext(item.id);
+      const value = await api.getEvidenceContext(item.id, item.revisionId);
+      const evidenceRevisionMismatch = item.revisionId
+        && value.evidenceRevisionId !== item.revisionId;
+      const sourceRevisionMismatch = item.sourceRevisionId
+        && value.sourceRevisionId !== item.sourceRevisionId;
+      if (evidenceRevisionMismatch || sourceRevisionMismatch) {
+        throw new ApiError(translate(localeRef.current, "context.revisionMismatch"));
+      }
       if (contextRequestRef.current === requestId) setLiveContext(value);
     } catch (error) {
       if (contextRequestRef.current === requestId) setContextError(describeError(error));

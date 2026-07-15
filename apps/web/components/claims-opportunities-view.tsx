@@ -77,6 +77,26 @@ const nextStepMessageKeys: Record<OpportunityDraft["nextStep"], MessageKey> = {
   frame_hypothesis: "next.hypothesis",
 };
 
+const topicMessageKeys: Readonly<Record<string, MessageKey>> = {
+  "risk-escalation": "topic.riskEscalation",
+  "auto-reply": "topic.autoReply",
+  "classification-routing": "topic.classificationRouting",
+  "explainability-governance": "topic.explainabilityGovernance",
+  onboarding: "topic.onboarding",
+  retention: "topic.retention",
+  "kind-pain": "kind.pain",
+  "kind-need": "kind.need",
+  "kind-behavior": "kind.behavior",
+  "kind-constraint": "kind.constraint",
+  "kind-counterevidence": "kind.counterevidence",
+  "kind-signal": "kind.signal",
+};
+
+function topicLabel(t: ClaimsTranslator, topicKey: string, fallback: string): string {
+  const messageKey = topicMessageKeys[topicKey];
+  return messageKey ? t(messageKey) : fallback;
+}
+
 function gapLabel(t: ClaimsTranslator, gap: InsightGap): string {
   return t(gapMessageKeys[gap.code], { count: gap.count ?? 0 });
 }
@@ -217,7 +237,9 @@ export function ClaimsOpportunitiesView({
                       aria-pressed={active}
                       onClick={() => setSelectedClaimId(claim.id)}
                     >
-                      <span className="insights-claim-topic">{claim.topicLabel}</span>
+                      <span className="insights-claim-topic">
+                        {topicLabel(t, claim.topicKey, claim.topicLabel)}
+                      </span>
                       <strong className="insights-claim-summary">{claim.statement}</strong>
                       <StrengthSummary claim={claim} t={t} />
                     </button>
@@ -352,7 +374,7 @@ export function ClaimsOpportunitiesView({
                         : "claims.needsEvidence")}
                     </span>
                   </div>
-                  <span>{opportunity.focus}</span>
+                  <span>{topicLabel(t, opportunity.topicKey, opportunity.focus)}</span>
                   <h3>{opportunity.problemStatement}</h3>
                   <div className="insights-next-step">
                     <span>{t("claims.nextStep")}</span>

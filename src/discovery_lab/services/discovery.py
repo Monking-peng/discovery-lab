@@ -774,8 +774,13 @@ class DiscoveryService:
         )
         return records, total
 
-    def get_evidence_context(self, evidence_id: UUID) -> EvidenceContextRecord:
-        row = self.session.execute(
+    def get_evidence_context(
+        self,
+        evidence_id: UUID,
+        *,
+        evidence_revision_id: UUID | None = None,
+    ) -> EvidenceContextRecord:
+        statement = (
             select(EvidenceUnit, EvidenceRevision, Segment, SourceRevision, Source)
             .join(
                 EvidenceRevision,
@@ -785,10 +790,15 @@ class DiscoveryService:
             .join(SourceRevision, SourceRevision.id == EvidenceRevision.source_revision_id)
             .join(Source, Source.id == SourceRevision.source_id)
             .where(EvidenceUnit.id == evidence_id)
-            .order_by(EvidenceRevision.revision.desc())
-            .limit(1)
-        ).one_or_none()
+        )
+        if evidence_revision_id is None:
+            statement = statement.order_by(EvidenceRevision.revision.desc()).limit(1)
+        else:
+            statement = statement.where(EvidenceRevision.id == evidence_revision_id)
+        row = self.session.execute(statement).one_or_none()
         if row is None:
+            if evidence_revision_id is not None:
+                raise NotFoundError("evidence_revision", evidence_revision_id)
             raise NotFoundError("evidence", evidence_id)
         evidence_unit, revision, segment, source_revision, source = row
         context_segments = tuple(

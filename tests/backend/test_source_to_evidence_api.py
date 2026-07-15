@@ -10,7 +10,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from discovery_lab.db.models import Run, SourceRevision
+from discovery_lab.db.models import EvidenceRevision, Run, Segment, SourceRevision
+from discovery_lab.services.evidence_integrity import evidence_content_hash
 from discovery_lab.services.hashing import sha256_bytes, sha256_text
 from discovery_lab.services.storage import LocalBlobStore
 
@@ -96,6 +97,85 @@ def _assert_traceable_context(
     return context
 
 
+def _create_two_segment_evidence(
+    client: TestClient,
+) -> tuple[dict[str, object], dict[str, object]]:
+    study = _create_study(client)
+    source = _upload_source(
+        client,
+        study["id"],
+        filename="revision-replay.txt",
+        content=(
+            "Original context remains replayable.\n\nLatest context is independently traceable."
+        ),
+        media_type="text/plain",
+    )
+    _assert_three_step_run(_process_source(client, source["id"]))
+    evidence = _evidence_for(client, study["id"])
+    original = next(
+        item for item in evidence if item["quote"] == "Original context remains replayable."
+    )
+    other = next(
+        item for item in evidence if item["quote"] == "Latest context is independently traceable."
+    )
+    return original, other
+
+
+def _append_second_evidence_revision(
+    session_factory: sessionmaker[Session],
+    *,
+    original: dict[str, object],
+    other: dict[str, object],
+) -> UUID:
+    with session_factory() as session:
+        first_revision = session.get(
+            EvidenceRevision,
+            UUID(str(original["evidence_revision_id"])),
+        )
+        replacement_segment = session.get(Segment, UUID(str(other["segment_id"])))
+        assert first_revision is not None
+        assert replacement_segment is not None
+
+        provenance = dict(first_revision.provenance)
+        confidence = provenance.get("confidence")
+        tags = provenance.get("tags")
+        extraction_method = provenance.get("extraction_method")
+        assert isinstance(confidence, (int, float)) and not isinstance(confidence, bool)
+        assert isinstance(tags, list) and all(isinstance(tag, str) for tag in tags)
+        assert isinstance(extraction_method, str)
+
+        second_revision = EvidenceRevision(
+            evidence_unit_id=first_revision.evidence_unit_id,
+            source_revision_id=replacement_segment.source_revision_id,
+            segment_id=replacement_segment.id,
+            run_step_id=first_revision.run_step_id,
+            revision=2,
+            evidence_type=first_revision.evidence_type,
+            quote=replacement_segment.text,
+            observation="SYNTHETIC DEMO ONLY: newer immutable evidence revision.",
+            interpretation=None,
+            inference=None,
+            review_status=first_revision.review_status,
+            locator=replacement_segment.locator,
+            content_hash=evidence_content_hash(
+                quote=replacement_segment.text,
+                observation="SYNTHETIC DEMO ONLY: newer immutable evidence revision.",
+                interpretation=None,
+                inference=None,
+                evidence_type=first_revision.evidence_type,
+                locator=replacement_segment.locator,
+                confidence=float(confidence),
+                tags=tags,
+                synthetic_demo=provenance.get("synthetic_demo") is True,
+                extraction_method=extraction_method,
+            ),
+            provenance=provenance,
+        )
+        session.add(second_revision)
+        session.commit()
+        return second_revision.id
+
+
 def test_markdown_source_to_evidence_to_context_round_trip(client: TestClient) -> None:
     assert client.get("/health").json() == {"status": "ok", "database": "ok"}
     study = _create_study(client)
@@ -161,6 +241,78 @@ def test_markdown_source_to_evidence_to_context_round_trip(client: TestClient) -
     repeated = _process_source(client, source["id"])
     assert repeated["id"] == run["id"]
     assert len(_evidence_for(client, study["id"])) == 2
+
+
+def test_evidence_context_defaults_to_latest_and_replays_an_explicit_old_revision(
+    client: TestClient,
+    session_factory: sessionmaker[Session],
+) -> None:
+    original, other = _create_two_segment_evidence(client)
+    latest_revision_id = _append_second_evidence_revision(
+        session_factory,
+        original=original,
+        other=other,
+    )
+
+    default_response = client.get(f"/v1/evidence/{original['id']}/context")
+    assert default_response.status_code == 200, default_response.text
+    latest = default_response.json()
+    assert latest["evidence_id"] == original["id"]
+    assert latest["evidence"]["evidence_revision_id"] == str(latest_revision_id)
+    assert latest["evidence"]["revision"] == 2
+    assert latest["highlight"] == "Latest context is independently traceable."
+    assert latest["before"] == "Original context remains replayable."
+    assert latest["after"] == ""
+    assert all(latest["integrity"].values())
+    assert [segment["id"] for segment in latest["context_segments"] if segment["is_target"]] == [
+        other["segment_id"]
+    ]
+
+    replay_response = client.get(
+        f"/v1/evidence/{original['id']}/context",
+        params={"evidence_revision_id": original["evidence_revision_id"]},
+    )
+    assert replay_response.status_code == 200, replay_response.text
+    replay = replay_response.json()
+    assert replay["evidence_id"] == original["id"]
+    assert replay["evidence"]["evidence_revision_id"] == original["evidence_revision_id"]
+    assert replay["evidence"]["revision"] == 1
+    assert replay["highlight"] == "Original context remains replayable."
+    assert replay["before"] == ""
+    assert replay["after"] == "Latest context is independently traceable."
+    assert all(replay["integrity"].values())
+    assert [segment["id"] for segment in replay["context_segments"] if segment["is_target"]] == [
+        original["segment_id"]
+    ]
+
+
+def test_evidence_context_rejects_foreign_and_missing_revision_ids(
+    client: TestClient,
+) -> None:
+    original, other = _create_two_segment_evidence(client)
+    missing_revision_id = uuid4()
+
+    for revision_id in (other["evidence_revision_id"], missing_revision_id):
+        response = client.get(
+            f"/v1/evidence/{original['id']}/context",
+            params={"evidence_revision_id": revision_id},
+        )
+        assert response.status_code == 404, response.text
+        error = response.json()["error"]
+        assert error["code"] == "not_found"
+        assert error["details"] == {
+            "resource": "evidence_revision",
+            "id": str(revision_id),
+        }
+
+    missing_evidence_id = uuid4()
+    missing_evidence = client.get(f"/v1/evidence/{missing_evidence_id}/context")
+    assert missing_evidence.status_code == 404, missing_evidence.text
+    assert missing_evidence.json()["error"] == {
+        "code": "not_found",
+        "message": "evidence was not found",
+        "details": {"resource": "evidence", "id": str(missing_evidence_id)},
+    }
 
 
 def test_csv_source_round_trip_preserves_stable_row_locators(client: TestClient) -> None:

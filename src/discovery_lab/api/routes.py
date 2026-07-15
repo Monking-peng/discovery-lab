@@ -491,6 +491,13 @@ def get_evidence_context(
     session: SessionDependency,
     blob_store: BlobStoreDependency,
     ingestion_runner: IngestionRunnerDependency,
+    evidence_revision_id: Annotated[
+        UUID | None,
+        Query(description="Replay context for this immutable evidence revision"),
+    ] = None,
 ) -> EvidenceContext:
-    record = _service(session, blob_store, ingestion_runner).get_evidence_context(evidence_id)
+    record = _service(session, blob_store, ingestion_runner).get_evidence_context(
+        evidence_id,
+        evidence_revision_id=evidence_revision_id,
+    )
     return _context_response(record)

@@ -8,7 +8,7 @@ DiscoveryLab 是一个证据驱动的 AI 产品发现与决策工作台。它把
 
 项目已经通过第一阶段 Architecture Gate，并完成两个可演示切片：**Source → Evidence → 原文回跳**，以及 **Evidence Revision → Claim / Opportunity 草稿 → 证据回跳**。真实 UI、API、PostgreSQL、不可变 Blob、LangGraph、解析器、抽取器、引用校验与离线评测已经连通；工作台支持 English / 简体中文即时切换并记住选择。
 
-Claims & Opportunities 当前是诚实的客户端确定性投影：只读取已有 Evidence，不写入数据库，不把合成、过期、驳回或缺失 revision 的材料包装成真实结论。每条边都绑定 Evidence Revision 与 Source Revision；逐字引文始终保留来源语言。
+Claims & Opportunities 当前是诚实的客户端确定性投影：只读取已有 Evidence，不写入数据库，不把合成、过期、驳回或缺失 revision 的材料包装成真实结论。每条边都绑定 Evidence Revision 与 Source Revision，打开时按该 revision 回放而不是读取“当前最新版”；除派生主张的锚点外，尚未建立 Claim-target 关系的材料只标为上下文，不冒充支持或反证。逐字引文始终保留来源语言。
 
 实施仍受以下架构门禁约束：
 
