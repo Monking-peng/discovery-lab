@@ -1,0 +1,420 @@
+{
+  "schema_version": "evidence-to-claim-dataset.v2",
+  "dataset": "evidence-to-claim-integrity",
+  "revision": 2,
+  "cases": [
+    {
+      "id": "accepted-support-can-enter-claim-review",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000001",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000001",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000001",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000001",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": true,
+        "review_blockers": [],
+        "publication_blockers": []
+      }
+    },
+    {
+      "id": "missing-evidence-review-fails-closed",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000002",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000002",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000002",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000002",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": null,
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["EVIDENCE_REVIEW_NOT_ACCEPTED"],
+        "publication_blockers": ["EVIDENCE_REVIEW_NOT_ACCEPTED"]
+      }
+    },
+    {
+      "id": "request-changes-is-not-acceptance",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000003",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000003",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000003",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000003",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "REQUEST_CHANGES",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["EVIDENCE_REVIEW_NOT_ACCEPTED"],
+        "publication_blockers": ["EVIDENCE_REVIEW_NOT_ACCEPTED"]
+      }
+    },
+    {
+      "id": "rejected-review-is-not-acceptance",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000004",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000004",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000004",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000004",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "REJECT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["EVIDENCE_REVIEW_NOT_ACCEPTED"],
+        "publication_blockers": ["EVIDENCE_REVIEW_NOT_ACCEPTED"]
+      }
+    },
+    {
+      "id": "synthetic-support-cannot-promote",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000005",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000005",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000005",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000005",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": true,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["SYNTHETIC_EVIDENCE"],
+        "publication_blockers": ["SYNTHETIC_EVIDENCE"]
+      }
+    },
+    {
+      "id": "cross-study-support-cannot-promote",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000006",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000006",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000006",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000006",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000099",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["CROSS_STUDY_EVIDENCE"],
+        "publication_blockers": ["CROSS_STUDY_EVIDENCE"]
+      }
+    },
+    {
+      "id": "revision-resolution-mismatch-fails-closed",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000007",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000007",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000008",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000008",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["EVIDENCE_REVISION_MISMATCH"],
+        "publication_blockers": ["EVIDENCE_REVISION_MISMATCH"]
+      }
+    },
+    {
+      "id": "old-revision-cannot-enter-new-claim-review",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000008",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000009",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000009",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000010",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["NOT_CURRENT_EVIDENCE_REVISION"],
+        "publication_blockers": ["NOT_CURRENT_EVIDENCE_REVISION"]
+      }
+    },
+    {
+      "id": "citation-integrity-failure-blocks-review",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000009",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000011",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000011",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000011",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": false,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["CITATION_INTEGRITY_FAILED"],
+        "publication_blockers": ["CITATION_INTEGRITY_FAILED"]
+      }
+    },
+    {
+      "id": "locator-replay-failure-blocks-review",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000010",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000012",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000012",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000012",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": false,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["LOCATOR_REPLAY_FAILED"],
+        "publication_blockers": ["LOCATOR_REPLAY_FAILED"]
+      }
+    },
+    {
+      "id": "source-hash-mismatch-blocks-review",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000011",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000013",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000013",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000013",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": false
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["SOURCE_HASH_MISMATCH"],
+        "publication_blockers": ["SOURCE_HASH_MISMATCH"]
+      }
+    },
+    {
+      "id": "context-only-claim-has-no-support",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "SEARCHED_NONE_FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "contextualizes",
+          "relation_confirmed": false,
+          "evidence_id": "20000000-0000-0000-0000-000000000012",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000014",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000014",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000014",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": null,
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": ["NO_CONFIRMED_SUPPORT"],
+        "publication_blockers": ["NO_CONFIRMED_SUPPORT"]
+      }
+    },
+    {
+      "id": "multiple-independent-blockers-are-all-visible",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "NOT_RUN",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": false,
+          "evidence_id": "20000000-0000-0000-0000-000000000013",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000015",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000016",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000016",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000099",
+          "latest_review_decision": "REQUEST_CHANGES",
+          "synthetic_demo": true,
+          "citation_integrity_passed": false,
+          "locator_replayable": false,
+          "source_hash_match": false
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": false,
+        "review_blockers": [
+          "NO_CONFIRMED_SUPPORT",
+          "FORMAL_RELATION_NOT_CONFIRMED",
+          "EVIDENCE_REVIEW_NOT_ACCEPTED",
+          "SYNTHETIC_EVIDENCE",
+          "CROSS_STUDY_EVIDENCE",
+          "EVIDENCE_REVISION_MISMATCH",
+          "CITATION_INTEGRITY_FAILED",
+          "LOCATOR_REPLAY_FAILED",
+          "SOURCE_HASH_MISMATCH"
+        ],
+        "publication_blockers": [
+          "NO_CONFIRMED_SUPPORT",
+          "FORMAL_RELATION_NOT_CONFIRMED",
+          "EVIDENCE_REVIEW_NOT_ACCEPTED",
+          "SYNTHETIC_EVIDENCE",
+          "CROSS_STUDY_EVIDENCE",
+          "EVIDENCE_REVISION_MISMATCH",
+          "CITATION_INTEGRITY_FAILED",
+          "LOCATOR_REPLAY_FAILED",
+          "SOURCE_HASH_MISMATCH",
+          "COUNTEREVIDENCE_NOT_RUN"
+        ]
+      }
+    },
+    {
+      "id": "counterevidence-not-run-blocks-publication",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "counterevidence_status": "NOT_RUN",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000014",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000017",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000017",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000017",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "expected": {
+        "eligible_for_claim_review": true,
+        "review_blockers": [],
+        "publication_blockers": ["COUNTEREVIDENCE_NOT_RUN"]
+      }
+    },
+    {
+      "id": "old-revision-replays-by-exact-identity",
+      "claim_study_id": "10000000-0000-0000-0000-000000000001",
+      "assessment_scope": "historical_replay",
+      "counterevidence_status": "FOUND",
+      "evidence_edges": [
+        {
+          "relationship": "supports",
+          "relation_confirmed": true,
+          "evidence_id": "20000000-0000-0000-0000-000000000015",
+          "requested_evidence_revision_id": "30000000-0000-0000-0000-000000000018",
+          "resolved_evidence_revision_id": "30000000-0000-0000-0000-000000000018",
+          "latest_evidence_revision_id": "30000000-0000-0000-0000-000000000019",
+          "evidence_study_id": "10000000-0000-0000-0000-000000000001",
+          "latest_review_decision": "ACCEPT",
+          "synthetic_demo": false,
+          "citation_integrity_passed": true,
+          "locator_replayable": true,
+          "source_hash_match": true
+        }
+      ],
+      "requires_exact_revision_replay": true,
+      "expected": {
+        "eligible_for_claim_review": true,
+        "review_blockers": [],
+        "publication_blockers": []
+      }
+    }
+  ]
+}

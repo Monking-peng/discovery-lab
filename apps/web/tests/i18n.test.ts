@@ -61,6 +61,9 @@ describe("message catalog and interpolation", () => {
     expect(translate("zh-CN", "nav.evidence")).toBe("证据浏览器");
     expect(translate("en", "language.zh")).toBe("简体中文");
     expect(translate("zh-CN", "language.zh")).toBe("简体中文");
+    expect(translate("en", "opportunities.savedTitle")).toBe("Saved opportunities");
+    expect(translate("zh-CN", "opportunities.savedTitle")).toBe("已保存机会");
+    expect(translate("zh-CN", "opportunities.notPublishable")).toBe("不可发布");
   });
 
   it("interpolates every supplied variable without changing the catalog", () => {

@@ -34,7 +34,12 @@ def engine() -> Iterator[Engine]:
 
     Base.metadata.create_all(engine)
     yield engine
-    Base.metadata.drop_all(engine)
+    # SQLite refuses to drop a populated table with a self-referential revision FK.
+    # Teardown is not a domain write, so temporarily suspend FK enforcement only here.
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        Base.metadata.drop_all(connection)
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
     engine.dispose()
 
 

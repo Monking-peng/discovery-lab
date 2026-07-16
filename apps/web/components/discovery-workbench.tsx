@@ -3,6 +3,7 @@
 import {
   Activity,
   AlertCircle,
+  AlertTriangle,
   ArrowRight,
   BookOpenCheck,
   Check,
@@ -22,10 +23,13 @@ import {
   Layers3,
   Languages,
   Link2,
+  LockKeyhole,
   LoaderCircle,
   MoreHorizontal,
+  PencilLine,
   Plus,
   RefreshCw,
+  Save,
   Search,
   ShieldCheck,
   Sparkles,
@@ -38,14 +42,17 @@ import {
   API_URL,
   ApiError,
   api,
+  type ClaimReviewDecision,
   type Evidence,
   type EvidenceContext,
+  type EvidenceRevisionAuthorInput,
   type RunStep,
   type RunSummary,
   type SourceItem,
   type Study,
 } from "@/lib/api";
 import { ClaimsOpportunitiesView } from "@/components/claims-opportunities-view";
+import { RetrievalLab } from "@/components/retrieval-lab";
 import { demoAgentEvents, demoContexts, demoEvidence, demoSources, demoStudies } from "@/lib/demo-data";
 import {
   DEFAULT_LOCALE,
@@ -118,6 +125,34 @@ function shortHash(value: string | undefined, t: Translator) {
   if (!value) return t("general.unavailable");
   if (value.length <= 24) return value;
   return `${value.slice(0, 12)}…${value.slice(-8)}`;
+}
+
+function requestId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") return crypto.randomUUID();
+  return `web-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function exactEvidenceSnapshot(
+  value: EvidenceContext,
+  expected: Evidence,
+  expectedRevisionId: string,
+  t: Translator,
+): Evidence {
+  const snapshot = value.evidenceSnapshot;
+  if (
+    value.evidenceId !== expected.id
+    || value.evidenceRevisionId !== expectedRevisionId
+    || value.sourceRevisionId !== expected.sourceRevisionId
+    || !snapshot
+    || snapshot.id !== expected.id
+    || snapshot.revisionId !== expectedRevisionId
+    || snapshot.studyId !== expected.studyId
+    || snapshot.sourceId !== expected.sourceId
+    || snapshot.sourceRevisionId !== expected.sourceRevisionId
+  ) {
+    throw new ApiError(t("context.revisionMismatch"));
+  }
+  return snapshot;
 }
 
 function valueRecord(value: unknown): Record<string, unknown> {
@@ -217,6 +252,170 @@ function LoadingShell({ t }: { t: Translator }) {
   );
 }
 
+type EvidenceReviewPanelProps = {
+  evidence: Evidence;
+  live: boolean;
+  currentRevision: boolean;
+  t: Translator;
+  onReview: (decision: ClaimReviewDecision, reviewer: string, rationale: string) => Promise<void>;
+  onAuthor: (input: EvidenceRevisionAuthorInput) => Promise<void>;
+};
+
+const RESERVED_SYNTHETIC_TAGS = new Set([
+  "synthetic-demo",
+  "demo-extractor",
+  "simulation-output",
+]);
+
+function editableHumanTags(tags: string[]) {
+  return tags.filter((tag) => (
+    !RESERVED_SYNTHETIC_TAGS.has(tag.trim().toLocaleLowerCase().replaceAll("_", "-"))
+  ));
+}
+
+function EvidenceReviewPanel({
+  evidence,
+  live,
+  currentRevision,
+  t,
+  onReview,
+  onAuthor,
+}: EvidenceReviewPanelProps) {
+  const [reviewer, setReviewer] = useState("");
+  const [reviewRationale, setReviewRationale] = useState("");
+  const [authorOpen, setAuthorOpen] = useState(evidence.syntheticDemo);
+  const [editor, setEditor] = useState("");
+  const [editRationale, setEditRationale] = useState("");
+  const [observation, setObservation] = useState(evidence.observation);
+  const [interpretation, setInterpretation] = useState(evidence.interpretation);
+  const [inference, setInference] = useState(evidence.inference ?? "");
+  const [confidence, setConfidence] = useState(String(Math.round(evidence.confidence * 100)));
+  const [tags, setTags] = useState(editableHumanTags(evidence.tags).join(", "));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const exactRevisionId = evidence.revisionId ?? "";
+  const reviewReady = live && Boolean(exactRevisionId && reviewer.trim() && reviewRationale.trim()) && !busy;
+  const authorReady = live && currentRevision && Boolean(
+    exactRevisionId
+    && editor.trim()
+    && editRationale.trim()
+    && observation.trim()
+    && confidence.trim(),
+  ) && !busy;
+
+  async function submitReview(decision: ClaimReviewDecision) {
+    if (!reviewReady || (decision === "ACCEPT" && evidence.syntheticDemo)) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await onReview(decision, reviewer.trim(), reviewRationale.trim());
+      setNotice(t("evidenceReview.reviewSaved"));
+    } catch (reviewError) {
+      setError(safeMessage(reviewError, t));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitAuthor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!authorReady) return;
+    const confidenceValue = Number(confidence);
+    if (!Number.isFinite(confidenceValue) || confidenceValue < 0 || confidenceValue > 100) {
+      setError(t("evidenceReview.confidenceInvalid"));
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await onAuthor({
+        baseRevisionId: exactRevisionId,
+        observation: observation.trim(),
+        interpretation: interpretation.trim() || null,
+        inference: inference.trim() || null,
+        confidence: confidenceValue / 100,
+        tags: tags.split(/[,;\n]/).map((tag) => tag.trim()).filter(Boolean),
+        editor: editor.trim(),
+        rationale: editRationale.trim(),
+        clientRequestId: requestId(),
+      });
+      setNotice(t("evidenceReview.revisionSaved"));
+    } catch (authorError) {
+      setError(safeMessage(authorError, t));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="evidence-review-card" aria-labelledby="evidence-review-title">
+      <div className="evidence-review-heading">
+        <div>
+          <span>{t("evidenceReview.eyebrow")}</span>
+          <h2 id="evidence-review-title">{t("evidenceReview.title")}</h2>
+        </div>
+        <span className="revision-lock"><LockKeyhole size={12} />{t("evidenceReview.exactRevision", { revision: exactRevisionId || t("general.unavailable") })}</span>
+      </div>
+
+      {evidence.syntheticDemo && (
+        <div className="evidence-review-warning" role="note">
+          <AlertTriangle size={16} />
+          <div><strong>{t("evidenceReview.syntheticBlocked")}</strong><span>{t("evidenceReview.syntheticHelp")}</span></div>
+        </div>
+      )}
+      {evidence.humanAuthored && (
+        <div className="evidence-review-lineage"><PencilLine size={13} />{t("evidenceReview.humanAuthored")}</div>
+      )}
+
+      <div className="evidence-review-fields">
+        <label>{t("evidenceReview.reviewer")}<input value={reviewer} onChange={(event) => setReviewer(event.target.value)} disabled={!live || busy} /></label>
+        <label>{t("evidenceReview.rationale")}<textarea value={reviewRationale} onChange={(event) => setReviewRationale(event.target.value)} rows={2} disabled={!live || busy} /></label>
+      </div>
+      <div className="evidence-review-actions">
+        <button type="button" className="primary-button" onClick={() => void submitReview("ACCEPT")} disabled={!reviewReady || evidence.syntheticDemo}>
+          {busy && <LoaderCircle className="spin" size={13} />}{t("evidenceReview.accept")}
+        </button>
+        <button type="button" className="secondary-button" onClick={() => void submitReview("REQUEST_CHANGES")} disabled={!reviewReady}>{t("evidenceReview.requestChanges")}</button>
+        <button type="button" className="danger-button" onClick={() => void submitReview("REJECT")} disabled={!reviewReady}>{t("evidenceReview.reject")}</button>
+      </div>
+
+      {!authorOpen ? (
+        <button type="button" className="evidence-author-toggle" onClick={() => setAuthorOpen(true)} disabled={!live || !currentRevision || busy}>
+          <PencilLine size={13} />{t("evidenceReview.authorTitle")}
+        </button>
+      ) : (
+        <form className="evidence-author-form" onSubmit={(event) => void submitAuthor(event)}>
+          <div className="evidence-author-head"><div><span>{t("evidenceReview.authorEyebrow")}</span><h3>{t("evidenceReview.authorTitle")}</h3></div>{!evidence.syntheticDemo && <button type="button" className="text-button" onClick={() => setAuthorOpen(false)}>{t("general.close")}</button>}</div>
+          <p>{t("evidenceReview.authorBody")}</p>
+          {!currentRevision && <div className="evidence-review-warning compact"><AlertTriangle size={14} /><span>{t("evidenceReview.historicalBlocked")}</span></div>}
+          <div className="locked-quote" role="note" aria-label={t("evidenceReview.quoteLocked")}>
+            <div><LockKeyhole size={12} /><strong>{t("evidenceReview.quoteLocked")}</strong></div>
+            <blockquote>“{evidence.quote}”</blockquote>
+          </div>
+          <div className="evidence-author-grid">
+            <label>{t("evidenceReview.observation")}<textarea value={observation} onChange={(event) => setObservation(event.target.value)} rows={3} required disabled={!currentRevision || busy} /></label>
+            <label>{t("evidenceReview.interpretation")}<textarea value={interpretation} onChange={(event) => setInterpretation(event.target.value)} rows={3} disabled={!currentRevision || busy} /></label>
+            <label>{t("evidenceReview.inference")}<textarea value={inference} onChange={(event) => setInference(event.target.value)} rows={3} disabled={!currentRevision || busy} /></label>
+            <label>{t("evidenceReview.tags")}<input value={tags} onChange={(event) => setTags(event.target.value)} disabled={!currentRevision || busy} /></label>
+            <label>{t("evidenceReview.confidence")}<input type="number" min="0" max="100" step="1" value={confidence} onChange={(event) => setConfidence(event.target.value)} required disabled={!currentRevision || busy} /></label>
+            <label>{t("evidenceReview.editor")}<input value={editor} onChange={(event) => setEditor(event.target.value)} required disabled={!currentRevision || busy} /></label>
+            <label className="evidence-author-rationale">{t("evidenceReview.editRationale")}<textarea value={editRationale} onChange={(event) => setEditRationale(event.target.value)} rows={2} required disabled={!currentRevision || busy} /></label>
+          </div>
+          <button className="primary-button evidence-author-submit" disabled={!authorReady}>
+            {busy ? <LoaderCircle className="spin" size={13} /> : <Save size={13} />}{t("evidenceReview.createRevision")}
+          </button>
+        </form>
+      )}
+
+      {error && <div className="form-error" role="alert">{error}</div>}
+      {notice && <div className="evidence-review-success" role="status"><CheckCircle2 size={13} />{notice}</div>}
+    </section>
+  );
+}
+
 export function DiscoveryWorkbench() {
   const [locale, setLocale] = useState<Locale>(DEFAULT_LOCALE);
   const [activeView, setActiveView] = useState<WorkbenchView>("evidence");
@@ -229,6 +428,7 @@ export function DiscoveryWorkbench() {
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [sourcesError, setSourcesError] = useState("");
   const [liveEvidence, setLiveEvidence] = useState<Evidence[]>([]);
+  const [pinnedEvidenceSnapshot, setPinnedEvidenceSnapshot] = useState<Evidence | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
   const [liveContext, setLiveContext] = useState<EvidenceContext | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
@@ -323,6 +523,7 @@ export function DiscoveryWorkbench() {
       if (evidenceRequestRef.current !== requestId) return;
       const firstItem = items[0] ?? null;
       setLiveEvidence(items);
+      setPinnedEvidenceSnapshot(null);
       setSelectedEvidenceId(firstItem?.id ?? "");
       if (firstItem) {
         void loadContext(firstItem);
@@ -334,6 +535,7 @@ export function DiscoveryWorkbench() {
     } catch (error) {
       if (evidenceRequestRef.current !== requestId) return;
       setLiveEvidence([]);
+      setPinnedEvidenceSnapshot(null);
       setSelectedEvidenceId("");
       setLiveContext(null);
       setEvidenceError(describeError(error));
@@ -383,6 +585,7 @@ export function DiscoveryWorkbench() {
       const nextStudyId = items[0]?.id ?? "";
       setStudies(items);
       setSelectedStudyId(nextStudyId);
+      setPinnedEvidenceSnapshot(null);
       setMode("live");
       setAgentEvents([]);
       setLiveRuns([]);
@@ -400,6 +603,7 @@ export function DiscoveryWorkbench() {
       setStudies(demoStudies);
       setSelectedStudyId("demo-helphub");
       setSelectedEvidenceId("");
+      setPinnedEvidenceSnapshot(null);
       setMode("demo");
       setLiveRuns([]);
       setRunTotal(1);
@@ -414,6 +618,7 @@ export function DiscoveryWorkbench() {
       const nextStudyId = items[0]?.id ?? "";
       setStudies(items);
       setSelectedStudyId(nextStudyId);
+      setPinnedEvidenceSnapshot(null);
       setMode("live");
       setAgentEvents([]);
       setLiveRuns([]);
@@ -429,6 +634,7 @@ export function DiscoveryWorkbench() {
       setConnectionError(describeError(error));
       setStudies(demoStudies);
       setSelectedStudyId("demo-helphub");
+      setPinnedEvidenceSnapshot(null);
       setMode("demo");
       setLiveRuns([]);
       setRunTotal(1);
@@ -458,8 +664,10 @@ export function DiscoveryWorkbench() {
     : evidence[0]?.id ?? "";
 
   const selectedEvidence = useMemo(
-    () => evidence.find((item) => item.id === activeEvidenceId) ?? null,
-    [activeEvidenceId, evidence],
+    () => pinnedEvidenceSnapshot?.id === activeEvidenceId
+      ? pinnedEvidenceSnapshot
+      : evidence.find((item) => item.id === activeEvidenceId) ?? null,
+    [activeEvidenceId, evidence, pinnedEvidenceSnapshot],
   );
   const kindLabels = useMemo<Record<Evidence["kind"], string>>(() => ({
     pain: t(kindMessageKeys.pain),
@@ -503,6 +711,10 @@ export function DiscoveryWorkbench() {
     ? agentEvents
     : evidenceRun ? agentEventsFromRun(evidenceRun, t, locale) : [];
   const context = mode === "demo" && selectedEvidence ? demoContexts[selectedEvidence.id] ?? null : liveContext;
+  const selectedIsCurrentEvidenceRevision = mode === "live" && Boolean(
+    selectedEvidence?.revisionId
+    && liveEvidence.find((item) => item.id === selectedEvidence.id)?.revisionId === selectedEvidence.revisionId,
+  );
   const visibleEvidenceLoading = mode === "live" && evidenceLoading;
   const visibleEvidenceError = mode === "live" ? evidenceError : "";
   const visibleContextLoading = mode === "live" && contextLoading;
@@ -516,6 +728,7 @@ export function DiscoveryWorkbench() {
   function selectStudy(studyId: string) {
     setSelectedStudyId(studyId);
     setSelectedEvidenceId("");
+    setPinnedEvidenceSnapshot(null);
     setUploadNotice("");
     if (mode !== "live") {
       setAgentEvents(studyId === "demo-helphub" ? demoAgentEvents.map((item) => ({ ...item })) : []);
@@ -538,6 +751,7 @@ export function DiscoveryWorkbench() {
   }
 
   function selectEvidence(item: Evidence) {
+    setPinnedEvidenceSnapshot(null);
     setSelectedEvidenceId(item.id);
     if (mode === "live") void loadContext(item);
   }
@@ -557,6 +771,137 @@ export function DiscoveryWorkbench() {
         block: "center",
       });
     });
+  }
+
+  async function openEvidenceRevisionFromClaim(
+    evidenceId: string,
+    evidenceRevisionId: string,
+    expectedSourceRevisionId?: string,
+  ) {
+    navigateView("evidence");
+    if (mode !== "live") {
+      const previewItem = evidence.find((item) => item.id === evidenceId && item.revisionId === evidenceRevisionId);
+      if (previewItem) openEvidenceFromClaim(previewItem);
+      return;
+    }
+    const requestId = ++contextRequestRef.current;
+    setContextLoading(true);
+    setContextError("");
+    setLiveContext(null);
+    try {
+      const value = await api.getEvidenceContext(evidenceId, evidenceRevisionId);
+      const snapshot = value.evidenceSnapshot;
+      if (
+        value.evidenceId !== evidenceId
+        || value.evidenceRevisionId !== evidenceRevisionId
+        || !snapshot
+        || snapshot.id !== evidenceId
+        || snapshot.revisionId !== evidenceRevisionId
+        || snapshot.studyId !== selectedStudyId
+        || snapshot.sourceRevisionId !== value.sourceRevisionId
+        || (expectedSourceRevisionId && snapshot.sourceRevisionId !== expectedSourceRevisionId)
+      ) {
+        throw new ApiError(translate(localeRef.current, "context.revisionMismatch"));
+      }
+      if (contextRequestRef.current !== requestId) return;
+      setPinnedEvidenceSnapshot(snapshot);
+      setSelectedEvidenceId(snapshot.id);
+      setLiveContext(value);
+      window.requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>(`[data-evidence-id="${CSS.escape(snapshot.id)}"]`)?.scrollIntoView({
+          behavior: "smooth",
+          block: "center",
+        });
+      });
+    } catch (error) {
+      if (contextRequestRef.current === requestId) setContextError(describeError(error));
+    } finally {
+      if (contextRequestRef.current === requestId) setContextLoading(false);
+    }
+  }
+
+  async function reviewEvidenceRevision(
+    item: Evidence,
+    decision: ClaimReviewDecision,
+    reviewer: string,
+    rationale: string,
+  ) {
+    if (mode !== "live" || !item.revisionId) {
+      throw new ApiError(t("evidenceReview.liveOnly"));
+    }
+    if (decision === "ACCEPT" && item.syntheticDemo) {
+      throw new ApiError(t("evidenceReview.syntheticBlocked"), 409, "synthetic_evidence_accept_forbidden");
+    }
+    const requestedRevisionId = item.revisionId;
+    const request = ++contextRequestRef.current;
+    setContextLoading(true);
+    setContextError("");
+    try {
+      await api.reviewEvidence(item.id, requestedRevisionId, {
+        decision,
+        reviewer,
+        rationale,
+        clientRequestId: requestId(),
+      });
+      if (contextRequestRef.current !== request) return;
+      const value = await api.getEvidenceContext(item.id, requestedRevisionId);
+      const snapshot = exactEvidenceSnapshot(value, item, requestedRevisionId, t);
+      if (contextRequestRef.current !== request) return;
+
+      const currentRevisionId = liveEvidence.find((candidate) => candidate.id === item.id)?.revisionId;
+      if (currentRevisionId === requestedRevisionId) {
+        setLiveEvidence((current) => current.map((candidate) => (
+          candidate.id === snapshot.id && candidate.revisionId === requestedRevisionId ? snapshot : candidate
+        )));
+        setPinnedEvidenceSnapshot(null);
+      } else {
+        setPinnedEvidenceSnapshot(snapshot);
+      }
+      setSelectedEvidenceId(snapshot.id);
+      setLiveContext(value);
+    } catch (error) {
+      if (contextRequestRef.current === request) setContextError(describeError(error));
+      throw error;
+    } finally {
+      if (contextRequestRef.current === request) setContextLoading(false);
+    }
+  }
+
+  async function authorEvidenceRevision(item: Evidence, input: EvidenceRevisionAuthorInput) {
+    const currentRevisionId = liveEvidence.find((candidate) => candidate.id === item.id)?.revisionId;
+    if (
+      mode !== "live"
+      || !item.revisionId
+      || input.baseRevisionId !== item.revisionId
+      || currentRevisionId !== item.revisionId
+    ) {
+      throw new ApiError(t("evidenceReview.historicalBlocked"), 409, "evidence_revision_conflict");
+    }
+    const request = ++contextRequestRef.current;
+    setContextLoading(true);
+    setContextError("");
+    try {
+      const authored = await api.authorEvidenceRevision(item.id, input);
+      if (contextRequestRef.current !== request) return;
+      const value = await api.getEvidenceContext(item.id, authored.evidenceRevisionId);
+      const snapshot = exactEvidenceSnapshot(value, item, authored.evidenceRevisionId, t);
+      if (snapshot.quote !== item.quote) {
+        throw new ApiError(t("evidenceReview.quoteChanged"), 409, "immutable_quote_changed");
+      }
+      if (contextRequestRef.current !== request) return;
+
+      setLiveEvidence((current) => current.map((candidate) => (
+        candidate.id === snapshot.id ? snapshot : candidate
+      )));
+      setPinnedEvidenceSnapshot(null);
+      setSelectedEvidenceId(snapshot.id);
+      setLiveContext(value);
+    } catch (error) {
+      if (contextRequestRef.current === request) setContextError(describeError(error));
+      throw error;
+    } finally {
+      if (contextRequestRef.current === request) setContextLoading(false);
+    }
   }
 
   function openAgentRun() {
@@ -884,6 +1229,16 @@ export function DiscoveryWorkbench() {
                     </label>
                   </div>
 
+                  <RetrievalLab
+                    key={selectedStudy.id}
+                    studyId={selectedStudy.id}
+                    live={mode === "live"}
+                    t={t}
+                    onOpenEvidenceRevision={(evidenceId, revisionId, sourceRevisionId) => (
+                      openEvidenceRevisionFromClaim(evidenceId, revisionId, sourceRevisionId)
+                    )}
+                  />
+
                   {visibleEvidenceLoading ? (
                     <div className="list-loading" role="status"><LoaderCircle className="spin" size={18} />{t("evidence.loading")}</div>
                   ) : visibleEvidenceError ? (
@@ -983,6 +1338,23 @@ export function DiscoveryWorkbench() {
                     <div><dt>{t("detail.runStep")}</dt><dd className="mono">{selectedEvidence.runStepId || t("general.unavailable")}</dd></div>
                   </dl>
                 </section>
+
+                {mode === "live" && selectedEvidence.revisionId && (
+                  <EvidenceReviewPanel
+                    key={`${selectedEvidence.id}:${selectedEvidence.revisionId}`}
+                    evidence={selectedEvidence}
+                    live
+                    currentRevision={selectedIsCurrentEvidenceRevision}
+                    t={t}
+                    onReview={(decision, reviewer, rationale) => reviewEvidenceRevision(
+                      selectedEvidence,
+                      decision,
+                      reviewer,
+                      rationale,
+                    )}
+                    onAuthor={(input) => authorEvidenceRevision(selectedEvidence, input)}
+                  />
+                )}
 
                 <section className="context-section">
                   <div className="section-heading">
@@ -1105,7 +1477,11 @@ export function DiscoveryWorkbench() {
             evidence={evidence}
             study={selectedStudy}
             t={t}
+            live={mode === "live"}
             onOpenEvidence={openEvidenceFromClaim}
+            onOpenEvidenceRevision={(evidenceId, revisionId) => {
+              void openEvidenceRevisionFromClaim(evidenceId, revisionId);
+            }}
           />
         )}
       </main>

@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +10,7 @@ import {
   type Locale,
 } from "../lib/i18n";
 import { makeEvidence } from "./evidence-fixture";
+import { makeClaim } from "./claim-fixture";
 
 const apiMocks = vi.hoisted(() => ({
   getStudies: vi.fn(),
@@ -18,6 +19,9 @@ const apiMocks = vi.hoisted(() => ({
   getSources: vi.fn(),
   getRuns: vi.fn(),
   getEvidenceContext: vi.fn(),
+  reviewEvidence: vi.fn(),
+  authorEvidenceRevision: vi.fn(),
+  getClaims: vi.fn(),
   uploadSource: vi.fn(),
   processSource: vi.fn(),
 }));
@@ -82,6 +86,22 @@ function primeLiveApi() {
   apiMocks.getSources.mockResolvedValue({ items: [] as SourceItem[], total: 0 });
   apiMocks.getRuns.mockResolvedValue({ items: [], total: 0 });
   apiMocks.getEvidenceContext.mockResolvedValue(context);
+  apiMocks.reviewEvidence.mockResolvedValue({
+    id: "evidence-review-1",
+    evidenceId: evidence.id,
+    evidenceRevisionId: evidence.revisionId,
+    decision: "ACCEPT",
+    reviewer: "Research lead",
+    rationale: "Verified against the source.",
+    clientRequestId: "request-1",
+    createdAt: "2026-07-16T00:00:00.000Z",
+  });
+  apiMocks.authorEvidenceRevision.mockResolvedValue({
+    evidenceId: evidence.id,
+    evidenceRevisionId: "evidence-integration-revision-8",
+    parentRevisionId: evidence.revisionId,
+  });
+  apiMocks.getClaims.mockResolvedValue({ items: [], total: 0 });
 }
 
 async function renderLiveWorkbench() {
@@ -191,5 +211,209 @@ describe("DiscoveryWorkbench navigation and locale integration", () => {
 
     expect(await screen.findByText(message("en", "context.revisionMismatch"))).toBeVisible();
     expect(screen.queryByLabelText(message("en", "integrity.aria"))).not.toBeInTheDocument();
+  });
+
+  it("replays an old evidence revision in detail without replacing the latest synthesis input", async () => {
+    const user = userEvent.setup();
+    const oldEvidence = makeEvidence({
+      ...evidence,
+      revisionId: "evidence-integration-revision-2",
+      revision: 2,
+      quote: "This is the older immutable wording.",
+      observation: "This observation belongs only to revision two.",
+    });
+    apiMocks.getClaims.mockResolvedValue({
+      items: [makeClaim({
+        studyId: study.id,
+        statement: "Saved claim with an old evidence edge.",
+        evidenceEdges: [{
+          id: "edge-old",
+          evidenceId: oldEvidence.id,
+          evidenceRevisionId: oldEvidence.revisionId!,
+          sourceId: oldEvidence.sourceId,
+          sourceRevisionId: oldEvidence.sourceRevisionId!,
+          relation: "contextualizes",
+          rationale: "Revision two supplies historical context.",
+          relevance: 0.7,
+          relationConfirmed: true,
+          contextUrl: "/context/old",
+          latestEvidenceReview: null,
+        }],
+      })],
+      total: 1,
+    });
+    await renderLiveWorkbench();
+    await user.click(screen.getByRole("button", { name: message("en", "nav.claims") }));
+    expect((await screen.findAllByText("Saved claim with an old evidence edge.")).length).toBeGreaterThan(0);
+
+    apiMocks.getEvidenceContext.mockResolvedValueOnce({
+      ...context,
+      evidenceRevisionId: oldEvidence.revisionId,
+      sourceRevisionId: oldEvidence.sourceRevisionId,
+      highlight: oldEvidence.quote,
+      evidenceSnapshot: oldEvidence,
+    });
+    const savedSection = screen.getByRole("heading", { name: "Saved claims" }).closest("section");
+    expect(savedSection).not.toBeNull();
+    await user.click(within(savedSection!).getByRole("button", { name: "Open evidence" }));
+    expect(await screen.findByText(`“${oldEvidence.quote}”`)).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: message("en", "nav.claims") }));
+    expect(screen.getByText(evidence.quote)).toBeVisible();
+    expect(screen.queryByText(oldEvidence.quote)).not.toBeInTheDocument();
+  });
+
+  it("posts a human review against the exact evidence revision and refreshes that snapshot", async () => {
+    const user = userEvent.setup();
+    const pendingEvidence = makeEvidence({ ...evidence, reviewStatus: "pending" });
+    apiMocks.getEvidence.mockResolvedValue([pendingEvidence]);
+    apiMocks.getEvidenceContext.mockResolvedValue({ ...context, evidenceSnapshot: pendingEvidence });
+
+    await renderLiveWorkbench();
+    await waitFor(() => expect(apiMocks.getEvidenceContext).toHaveBeenCalledWith(
+      pendingEvidence.id,
+      pendingEvidence.revisionId,
+    ));
+    apiMocks.getEvidenceContext.mockClear();
+    apiMocks.getEvidenceContext.mockResolvedValueOnce({
+      ...context,
+      evidenceSnapshot: { ...pendingEvidence, reviewStatus: "approved" },
+    });
+
+    fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.reviewer")), {
+      target: { value: "Research lead" },
+    });
+    fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.rationale")), {
+      target: { value: "Verified against the exact source passage." },
+    });
+    await user.click(screen.getByRole("button", { name: message("en", "evidenceReview.accept") }));
+
+    await waitFor(() => expect(apiMocks.reviewEvidence).toHaveBeenCalledWith(
+      pendingEvidence.id,
+      pendingEvidence.revisionId,
+      expect.objectContaining({
+        decision: "ACCEPT",
+        reviewer: "Research lead",
+        rationale: "Verified against the exact source passage.",
+        clientRequestId: expect.any(String),
+      }),
+    ));
+    await waitFor(() => expect(apiMocks.getEvidenceContext).toHaveBeenCalledWith(
+      pendingEvidence.id,
+      pendingEvidence.revisionId,
+    ));
+    expect(await screen.findByText(message("en", "evidenceReview.reviewSaved"))).toBeVisible();
+  });
+
+  it("blocks synthetic acceptance and opens the locked human-authoring workflow", async () => {
+    const syntheticEvidence = makeEvidence({
+      ...evidence,
+      reviewStatus: "pending",
+      syntheticDemo: true,
+      humanAuthored: false,
+      tags: ["synthetic-demo", "routing"],
+    });
+    apiMocks.getEvidence.mockResolvedValue([syntheticEvidence]);
+    apiMocks.getEvidenceContext.mockResolvedValue({
+      ...context,
+      evidenceSnapshot: syntheticEvidence,
+    });
+
+    await renderLiveWorkbench();
+
+    expect(screen.getByRole("button", { name: message("en", "evidenceReview.accept") })).toBeDisabled();
+    expect(screen.getByText(message("en", "evidenceReview.syntheticBlocked"))).toBeVisible();
+    expect(screen.getByRole("heading", { name: message("en", "evidenceReview.authorTitle") })).toBeVisible();
+    expect(screen.getByLabelText(message("en", "evidenceReview.quoteLocked"))).toHaveTextContent(
+      syntheticEvidence.quote,
+    );
+    expect(screen.getByLabelText(message("en", "evidenceReview.tags"))).toHaveValue("routing");
+    expect(apiMocks.reviewEvidence).not.toHaveBeenCalled();
+  });
+
+  it("authors from base_revision_id without sending the quote and reloads the new exact context", async () => {
+    const user = userEvent.setup();
+    const syntheticEvidence = makeEvidence({
+      ...evidence,
+      reviewStatus: "pending",
+      syntheticDemo: true,
+      humanAuthored: false,
+    });
+    const authoredEvidence = makeEvidence({
+      ...syntheticEvidence,
+      revisionId: "evidence-integration-revision-8",
+      revision: 8,
+      observation: "A researcher-authored observation.",
+      interpretation: "A researcher-authored interpretation.",
+      inference: "A falsifiable researcher-authored inference.",
+      tags: ["routing", "human-reviewed"],
+      syntheticDemo: false,
+      humanAuthored: true,
+      parentRevisionId: syntheticEvidence.revisionId,
+    });
+    apiMocks.getEvidence.mockResolvedValue([syntheticEvidence]);
+    apiMocks.getEvidenceContext.mockResolvedValue({
+      ...context,
+      evidenceSnapshot: syntheticEvidence,
+    });
+    apiMocks.authorEvidenceRevision.mockResolvedValue({
+      evidenceId: syntheticEvidence.id,
+      evidenceRevisionId: authoredEvidence.revisionId,
+      parentRevisionId: syntheticEvidence.revisionId,
+    });
+
+    await renderLiveWorkbench();
+    await waitFor(() => expect(apiMocks.getEvidenceContext).toHaveBeenCalledWith(
+      syntheticEvidence.id,
+      syntheticEvidence.revisionId,
+    ));
+    apiMocks.getEvidenceContext.mockClear();
+    apiMocks.getEvidenceContext.mockResolvedValueOnce({
+      ...context,
+      evidenceRevisionId: authoredEvidence.revisionId,
+      highlight: authoredEvidence.quote,
+      evidenceSnapshot: authoredEvidence,
+    });
+
+    fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.observation")), {
+      target: { value: authoredEvidence.observation },
+    });
+    fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.interpretation")), {
+      target: { value: authoredEvidence.interpretation },
+    });
+    fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.inference")), {
+      target: { value: authoredEvidence.inference },
+    });
+    fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.tags")), {
+      target: { value: "routing, human-reviewed" },
+    });
+    fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.editor")), {
+      target: { value: "Research lead" },
+    });
+    fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.editRationale")), {
+      target: { value: "Replace a synthetic interpretation with accountable human analysis." },
+    });
+    await user.click(screen.getByRole("button", { name: message("en", "evidenceReview.createRevision") }));
+
+    await waitFor(() => expect(apiMocks.authorEvidenceRevision).toHaveBeenCalledWith(
+      syntheticEvidence.id,
+      expect.objectContaining({
+        baseRevisionId: syntheticEvidence.revisionId,
+        observation: authoredEvidence.observation,
+        interpretation: authoredEvidence.interpretation,
+        inference: authoredEvidence.inference,
+        tags: ["routing", "human-reviewed"],
+        editor: "Research lead",
+        clientRequestId: expect.any(String),
+      }),
+    ));
+    const authorPayload = apiMocks.authorEvidenceRevision.mock.calls[0]?.[1];
+    expect(authorPayload).not.toHaveProperty("quote");
+    await waitFor(() => expect(apiMocks.getEvidenceContext).toHaveBeenCalledWith(
+      syntheticEvidence.id,
+      authoredEvidence.revisionId,
+    ));
+    expect(await screen.findByText(authoredEvidence.observation)).toBeVisible();
+    expect(screen.getByText(message("en", "evidenceReview.humanAuthored"))).toBeVisible();
   });
 });

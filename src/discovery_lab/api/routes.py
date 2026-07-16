@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile, status
-from pydantic import TypeAdapter, ValidationError
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from discovery_lab.api.dependencies import (
@@ -32,7 +32,6 @@ from discovery_lab.domain.schemas import (
     StudyList,
     StudyRead,
 )
-from discovery_lab.ingestion.models import CsvLocator, Locator, PdfLocator, TextLocator
 from discovery_lab.services.discovery import (
     DiscoveryService,
     EvidenceContextRecord,
@@ -40,13 +39,16 @@ from discovery_lab.services.discovery import (
     SourceRecord,
     StudyRecord,
 )
-from discovery_lab.services.evidence_integrity import evidence_content_hash
+from discovery_lab.services.evidence_integrity import (
+    evidence_content_hash,
+    parse_locator,
+    relative_quote_span,
+)
 from discovery_lab.services.hashing import sha256_text
 from discovery_lab.services.ingestion_runner import IngestionRunner
 from discovery_lab.services.storage import BlobStore
 
 router = APIRouter()
-LOCATOR_ADAPTER: TypeAdapter[Locator] = TypeAdapter(Locator)
 
 SessionDependency = Annotated[Session, Depends(get_session)]
 BlobStoreDependency = Annotated[BlobStore, Depends(get_blob_store)]
@@ -155,11 +157,19 @@ def _evidence_response(record: EvidenceRecord) -> EvidenceRead:
     revision = record.revision
     title_source = revision.observation or revision.quote
     title = title_source.strip().splitlines()[0][:120] or "原文摘录"
+    domain_review_status = (
+        record.latest_review.decision
+        if record.latest_review is not None
+        else revision.review_status
+    )
     review_status = {
         "PROPOSED": "pending",
         "REVIEWED": "reviewed",
         "REJECTED": "rejected",
-    }.get(revision.review_status, "pending")
+        "ACCEPT": "reviewed",
+        "REQUEST_CHANGES": "pending",
+        "REJECT": "rejected",
+    }.get(domain_review_status, "pending")
     confidence_value = revision.provenance.get("confidence")
     confidence = (
         float(confidence_value)
@@ -352,31 +362,14 @@ def list_evidence(
     )
 
 
-def _relative_quote_span(
-    segment_locator: Locator,
-    evidence_locator: Locator,
-) -> tuple[int, int] | None:
-    if isinstance(segment_locator, TextLocator) and isinstance(evidence_locator, TextLocator):
-        return (
-            evidence_locator.char_start - segment_locator.char_start,
-            evidence_locator.char_end - segment_locator.char_start,
-        )
-    if isinstance(segment_locator, CsvLocator) and isinstance(evidence_locator, CsvLocator):
-        return (
-            evidence_locator.rendered_char_start,
-            evidence_locator.rendered_char_end,
-        )
-    if isinstance(segment_locator, PdfLocator) and isinstance(evidence_locator, PdfLocator):
-        return (
-            evidence_locator.page_char_start - segment_locator.page_char_start,
-            evidence_locator.page_char_end - segment_locator.page_char_start,
-        )
-    return None
-
-
 def _context_response(record: EvidenceContextRecord) -> EvidenceContext:
     evidence = _evidence_response(
-        EvidenceRecord(record.evidence_unit, record.revision, record.source)
+        EvidenceRecord(
+            record.evidence_unit,
+            record.revision,
+            record.source,
+            record.latest_review,
+        )
     )
     target_index = next(
         index
@@ -384,15 +377,15 @@ def _context_response(record: EvidenceContextRecord) -> EvidenceContext:
         if segment.id == record.segment.id
     )
     try:
-        segment_locator = LOCATOR_ADAPTER.validate_python(record.segment.locator)
-        evidence_locator = LOCATOR_ADAPTER.validate_python(record.revision.locator)
+        segment_locator = parse_locator(record.segment.locator)
+        evidence_locator = parse_locator(record.revision.locator)
     except ValidationError as exc:
         raise AppError(
             code="provenance_corrupt",
             message="Stored evidence provenance failed its typed locator schema",
             status_code=500,
         ) from exc
-    relative_span = _relative_quote_span(segment_locator, evidence_locator)
+    relative_span = relative_quote_span(segment_locator, evidence_locator)
     valid_span = relative_span is not None and 0 <= relative_span[0] <= relative_span[1] <= len(
         record.segment.text
     )

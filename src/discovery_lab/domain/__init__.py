@@ -1,5 +1,10 @@
 from discovery_lab.domain.enums import (
+    ClaimEvidenceRelation,
+    ClaimStatus,
+    CounterevidenceStatus,
     EvidenceReviewStatus,
+    OpportunityStatus,
+    ReviewDecision,
     RunStatus,
     RunStepStatus,
     SourceStatus,
@@ -7,7 +12,12 @@ from discovery_lab.domain.enums import (
 )
 
 __all__ = [
+    "ClaimEvidenceRelation",
+    "ClaimStatus",
+    "CounterevidenceStatus",
     "EvidenceReviewStatus",
+    "OpportunityStatus",
+    "ReviewDecision",
     "RunStatus",
     "RunStepStatus",
     "SourceStatus",

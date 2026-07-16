@@ -21,6 +21,13 @@ try {
         --dataset "evals\golden\source_to_evidence.json" `
         --output ".cache\evals\source-to-evidence.json"
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $Uv run python -m discovery_lab.evaluation.evidence_to_claim `
+        --dataset "evals\golden\evidence_to_claim.json" `
+        --output ".cache\evals\evidence-to-claim.json"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & $Uv run python -m discovery_lab.evaluation.bad_cases `
+        --output ".cache\evals\bad-cases.json"
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     if (Test-Path (Join-Path $ProjectRoot "apps\web\node_modules")) {
         & pnpm lint:web
