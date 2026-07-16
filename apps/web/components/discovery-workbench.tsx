@@ -51,7 +51,10 @@ import {
   type SourceItem,
   type Study,
 } from "@/lib/api";
+import { AgentRunCenter } from "@/components/agent-run-center";
 import { ClaimsOpportunitiesView } from "@/components/claims-opportunities-view";
+import { EvaluationCenter } from "@/components/evaluation-center";
+import { ProductDecisionCenter } from "@/components/product-decision-center";
 import { RetrievalLab } from "@/components/retrieval-lab";
 import { demoAgentEvents, demoContexts, demoEvidence, demoSources, demoStudies } from "@/lib/demo-data";
 import {
@@ -67,7 +70,7 @@ import {
 } from "@/lib/i18n";
 
 type ConnectionMode = "loading" | "live" | "demo";
-type WorkbenchView = "evidence" | "claims";
+type WorkbenchView = "evidence" | "claims" | "runs" | "eval" | "product";
 type Translator = (key: MessageKey, vars?: TranslationVars) => string;
 type AgentEvent = {
   id: string;
@@ -416,6 +419,20 @@ function EvidenceReviewPanel({
   );
 }
 
+function preferredInitialStudyId(items: Study[]): string {
+  const preferred = items.reduce<Study | null>((best, candidate) => {
+    if (!best) return candidate;
+    if (candidate.evidenceCount !== best.evidenceCount) {
+      return candidate.evidenceCount > best.evidenceCount ? candidate : best;
+    }
+    if (candidate.sourceCount !== best.sourceCount) {
+      return candidate.sourceCount > best.sourceCount ? candidate : best;
+    }
+    return best;
+  }, null);
+  return preferred?.id ?? "";
+}
+
 export function DiscoveryWorkbench() {
   const [locale, setLocale] = useState<Locale>(DEFAULT_LOCALE);
   const [activeView, setActiveView] = useState<WorkbenchView>("evidence");
@@ -486,7 +503,13 @@ export function DiscoveryWorkbench() {
   }, [locale]);
 
   useEffect(() => {
-    const syncViewFromHash = () => setActiveView(window.location.hash === "#claims" ? "claims" : "evidence");
+    const syncViewFromHash = () => {
+      if (window.location.hash === "#claims") setActiveView("claims");
+      else if (window.location.hash === "#runs") setActiveView("runs");
+      else if (window.location.hash === "#eval") setActiveView("eval");
+      else if (window.location.hash === "#product") setActiveView("product");
+      else setActiveView("evidence");
+    };
     syncViewFromHash();
     window.addEventListener("hashchange", syncViewFromHash);
     return () => window.removeEventListener("hashchange", syncViewFromHash);
@@ -582,7 +605,7 @@ export function DiscoveryWorkbench() {
     setConnectionError("");
     try {
       const items = await api.getStudies();
-      const nextStudyId = items[0]?.id ?? "";
+      const nextStudyId = preferredInitialStudyId(items);
       setStudies(items);
       setSelectedStudyId(nextStudyId);
       setPinnedEvidenceSnapshot(null);
@@ -615,7 +638,7 @@ export function DiscoveryWorkbench() {
     let cancelled = false;
     void api.getStudies().then((items) => {
       if (cancelled) return;
-      const nextStudyId = items[0]?.id ?? "";
+      const nextStudyId = preferredInitialStudyId(items);
       setStudies(items);
       setSelectedStudyId(nextStudyId);
       setPinnedEvidenceSnapshot(null);
@@ -758,7 +781,7 @@ export function DiscoveryWorkbench() {
 
   function navigateView(view: WorkbenchView) {
     setActiveView(view);
-    const hash = view === "claims" ? "#claims" : "#evidence";
+    const hash = `#${view}`;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
   }
 
@@ -904,13 +927,6 @@ export function DiscoveryWorkbench() {
     }
   }
 
-  function openAgentRun() {
-    navigateView("evidence");
-    window.requestAnimationFrame(() => {
-      document.getElementById("agent-run")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }
-
   const filteredEvidence = useMemo(() => {
     const query = search.trim().toLocaleLowerCase(locale);
     return evidence.filter((item) => {
@@ -1030,14 +1046,29 @@ export function DiscoveryWorkbench() {
             aria-current={activeView === "claims" ? "page" : undefined}
             onClick={() => navigateView("claims")}
           ><GitBranch size={16} />{t("nav.claims")}</button>
-          <button type="button" className="nav-item secondary" onClick={openAgentRun}>
+          <button
+            type="button"
+            className={`nav-item secondary ${activeView === "runs" ? "active" : ""}`}
+            aria-current={activeView === "runs" ? "page" : undefined}
+            onClick={() => navigateView("runs")}
+          >
             <Activity size={16} />{t("nav.runs")}
           </button>
-          <button type="button" className="nav-item secondary" disabled title={t("nav.comingSoon")}>
+          <button
+            type="button"
+            className={`nav-item secondary ${activeView === "eval" ? "active" : ""}`}
+            aria-current={activeView === "eval" ? "page" : undefined}
+            onClick={() => navigateView("eval")}
+          >
             <FlaskConical size={16} />{t("nav.eval")}
           </button>
-          <button type="button" className="nav-item secondary" disabled title={t("nav.comingSoon")}>
-            <Layers3 size={16} />{t("nav.integrations")}
+          <button
+            type="button"
+            className={`nav-item secondary ${activeView === "product" ? "active" : ""}`}
+            aria-current={activeView === "product" ? "page" : undefined}
+            onClick={() => navigateView("product")}
+          >
+            <Layers3 size={16} />{t("nav.product")}
           </button>
         </nav>
 
@@ -1080,7 +1111,7 @@ export function DiscoveryWorkbench() {
         <header className="workspace-header">
           <div>
             <div className="breadcrumb"><FolderKanban size={14} />{t("header.studies")} <span>/</span> {selectedStudy?.title ?? t("header.noStudy")}</div>
-            <h1>{activeView === "claims" ? t("header.claims") : t("header.evidence")}</h1>
+            <h1>{activeView === "claims" ? t("header.claims") : activeView === "runs" ? t("header.runs") : activeView === "eval" ? t("header.eval") : activeView === "product" ? t("header.product") : t("header.evidence")}</h1>
           </div>
           <div className="connection-cluster">
             <div className="locale-switcher" role="group" aria-label={t("language.label")}>
@@ -1472,7 +1503,7 @@ export function DiscoveryWorkbench() {
             )}
           </aside>
         </div>
-        ) : (
+        ) : activeView === "claims" ? (
           <ClaimsOpportunitiesView
             evidence={evidence}
             study={selectedStudy}
@@ -1483,6 +1514,12 @@ export function DiscoveryWorkbench() {
               void openEvidenceRevisionFromClaim(evidenceId, revisionId);
             }}
           />
+        ) : activeView === "eval" ? (
+          <EvaluationCenter live={mode === "live"} t={t} />
+        ) : activeView === "product" ? (
+          <ProductDecisionCenter live={mode === "live"} study={selectedStudy} t={t} />
+        ) : (
+          <AgentRunCenter live={mode === "live"} study={selectedStudy} t={t} />
         )}
       </main>
 

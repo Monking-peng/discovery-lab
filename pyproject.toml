@@ -28,6 +28,9 @@ dependencies = [
   "uvicorn[standard]>=0.35,<1",
 ]
 
+[project.scripts]
+discovery-lab-mcp = "discovery_lab.mcp_server:main"
+
 [dependency-groups]
 dev = [
   "mypy>=1.18,<2",

@@ -181,6 +181,12 @@ function Initialize-SeedStateShape {
     ) {
         $State.curation.opportunity = @{}
     }
+    if (
+        -not $State.curation.ContainsKey("product_chain") -or
+        $null -eq $State.curation.product_chain
+    ) {
+        $State.curation.product_chain = @{}
+    }
     return $State
 }
 
@@ -679,13 +685,176 @@ function Invoke-CuratedOpportunitySeed {
     return $Opportunity
 }
 
+function Invoke-CuratedProductChainSeed {
+    param(
+        [object]$Manifest,
+        [object]$Claim,
+        [string]$StudyId,
+        [hashtable]$State
+    )
+
+    $RunRequestId = "{0}:{1}:agent-run:v1" -f @(
+        [string]$Manifest.profile,
+        $StudyId
+    )
+    Write-Host "Running the approval-gated HelpHub Agent workflow..." -ForegroundColor Cyan
+    $Run = Invoke-JsonApiRequest `
+        -Method "POST" `
+        -Path "/v1/studies/$StudyId/agent-runs" `
+        -Body @{
+            goal = "Reduce missed high-risk escalation without removing human control."
+            claim_revision_id = [string]$Claim.claim_revision_id
+            retrieval = @{
+                query = "enterprise ticket escalation SLA reopen high risk"
+                purpose = "support"
+                limit = 6
+            }
+            requested_action = @{
+                tool_name = "create_experiment_draft"
+                arguments = @{
+                    title = "Human-confirmed risk escalation pilot"
+                    primary_metric = "missed high-risk escalation rate"
+                    success_threshold = (
+                        "at least 30% relative reduction with false-positive " +
+                        "escalation below 10%"
+                    )
+                    target_cohort = "HelpHub enterprise support agents"
+                }
+            }
+            client_request_id = $RunRequestId
+        }
+
+    $WriteCall = @(
+        $Run.tool_calls | Where-Object {
+            [string]$_.tool_name -eq "create_experiment_draft"
+        }
+    ) | Select-Object -First 1
+    if ($null -eq $WriteCall) {
+        throw "HelpHub Agent Run did not persist its write Tool Call."
+    }
+    if ([string]$Run.phase -eq "WAITING_HUMAN") {
+        $ApprovalRequestId = "{0}:{1}:agent-approval:v1" -f @(
+            [string]$Manifest.profile,
+            $StudyId
+        )
+        Write-Host "Applying the named fixture approval to the exact Tool Call hash..." `
+            -ForegroundColor Cyan
+        $Run = Invoke-JsonApiRequest `
+            -Method "POST" `
+            -Path "/v1/tool-calls/$($WriteCall.id)/approvals" `
+            -Body @{
+                decision = "APPROVE"
+                arguments_hash = [string]$WriteCall.arguments_hash
+                reviewer = "HelpHub fixture product lead"
+                rationale = (
+                    "Fixture approval for a local, bounded Experiment Draft. " +
+                    "No external system is written."
+                )
+                client_request_id = $ApprovalRequestId
+            }
+        $WriteCall = @(
+            $Run.tool_calls | Where-Object {
+                [string]$_.tool_name -eq "create_experiment_draft"
+            }
+        ) | Select-Object -First 1
+    }
+    if (
+        [string]$Run.phase -ne "COMPLETED" -or
+        [string]$WriteCall.status -ne "SUCCEEDED" -or
+        [bool]$WriteCall.result.external_system_written -ne $false
+    ) {
+        throw "HelpHub Agent Run did not complete its local-only approved write."
+    }
+
+    $ExperimentId = [string]$WriteCall.result.experiment_id
+    $HypothesisId = [string]$WriteCall.result.hypothesis_id
+    if (
+        [string]::IsNullOrWhiteSpace($ExperimentId) -or
+        [string]::IsNullOrWhiteSpace($HypothesisId)
+    ) {
+        throw "Approved HelpHub Tool Call did not return persisted product artifact IDs."
+    }
+
+    $DecisionRequestId = "{0}:{1}:product-decision:v1" -f @(
+        [string]$Manifest.profile,
+        $StudyId
+    )
+    $Decision = Invoke-JsonApiRequest `
+        -Method "POST" `
+        -Path "/v1/experiments/$ExperimentId/decisions" `
+        -Body @{
+            decision = "PROCEED"
+            observed_result = (
+                "Synthetic offline fixture replay reduced missed high-risk escalation by " +
+                "34% while false-positive escalation remained at 7%."
+            )
+            rationale = (
+                "The fixture result meets the declared threshold without breaching the " +
+                "guardrail; it is portfolio demo data, not a production result."
+            )
+            decided_by = "HelpHub fixture product lead"
+            client_request_id = $DecisionRequestId
+        }
+
+    $PrdRequestId = "{0}:{1}:prd:v1" -f @(
+        [string]$Manifest.profile,
+        $StudyId
+    )
+    $Prd = Invoke-JsonApiRequest `
+        -Method "POST" `
+        -Path "/v1/decisions/$($Decision.id)/prds" `
+        -Body @{
+            title = "HelpHub Assisted Risk Escalation Pilot PRD"
+            client_request_id = $PrdRequestId
+        }
+    $Prd = Invoke-JsonApiRequest -Method "GET" -Path "/v1/prds/$($Prd.id)"
+    $ClaimCitations = @($Prd.citations | Where-Object { [string]$_.kind -eq "claim_revision" })
+    $EvidenceCitations = @(
+        $Prd.citations | Where-Object { [string]$_.kind -eq "evidence_revision" }
+    )
+    if (
+        [string]$Prd.status -ne "DRAFT" -or
+        [bool]$Prd.publishable -ne $false -or
+        "PRD_REQUIRES_FINAL_REVIEW" -notin @($Prd.publication_blockers) -or
+        "EXTERNAL_PUBLICATION_NOT_IMPLEMENTED" -notin @($Prd.publication_blockers) -or
+        $ClaimCitations.Count -ne 1 -or
+        [string]$ClaimCitations[0].revision_id -ne [string]$Claim.claim_revision_id -or
+        $EvidenceCitations.Count -lt 1
+    ) {
+        throw "HelpHub PRD did not preserve its exact citation and publication gates."
+    }
+
+    $State.curation.product_chain = @{
+        run_id = [string]$Run.id
+        run_client_request_id = $RunRequestId
+        tool_call_id = [string]$WriteCall.id
+        arguments_hash = [string]$WriteCall.arguments_hash
+        hypothesis_id = $HypothesisId
+        experiment_id = $ExperimentId
+        decision_id = [string]$Decision.id
+        decision_client_request_id = $DecisionRequestId
+        prd_id = [string]$Prd.id
+        prd_client_request_id = $PrdRequestId
+        external_system_written = $false
+    }
+    Save-SeedState $State
+    return @{
+        run = $Run
+        experiment_id = $ExperimentId
+        hypothesis_id = $HypothesisId
+        decision = $Decision
+        prd = $Prd
+    }
+}
+
 function Show-SeedSummary {
     param(
         [object]$Study,
         [object]$EvidencePayload,
         [hashtable]$CuratedEvidence,
         [object]$Claim,
-        [object]$Opportunity
+        [object]$Opportunity,
+        [hashtable]$ProductChain
     )
 
     $EvidenceItems = @($EvidencePayload.items)
@@ -709,6 +878,10 @@ function Show-SeedSummary {
     Write-Host "  Human-reviewed Evidence: $($CuratedEvidence.Count)"
     Write-Host "  Reviewed Claim: $($Claim.claim_id) (revision $($Claim.revision))"
     Write-Host "  Opportunity Draft: $($Opportunity.id) (pinned to Claim revision $($Claim.revision))"
+    Write-Host "  Agent Run: $($ProductChain.run.id) (approved local-only Tool Call)"
+    Write-Host "  Experiment Draft: $($ProductChain.experiment_id)"
+    Write-Host "  Product Decision: $($ProductChain.decision.id)"
+    Write-Host "  Exactly cited PRD: $($ProductChain.prd.id) (not publishable)"
     Write-Host "  Integrity spot-checks: $IntegrityPassed/$([Math]::Min(3, $EvidenceItems.Count))"
     Write-Host "  Resume state: $StateFile"
     Write-Host "  Open: $WebUrl"
@@ -950,6 +1123,11 @@ try {
         -Claim $Claim `
         -StudyId ([string]$Study.id) `
         -State $State
+    $ProductChain = Invoke-CuratedProductChainSeed `
+        -Manifest $Manifest `
+        -Claim $Claim `
+        -StudyId ([string]$Study.id) `
+        -State $State
 
     $Study = Invoke-JsonApiRequest -Method "GET" -Path "/v1/studies/$($Study.id)"
     $Evidence = Invoke-JsonApiRequest `
@@ -960,7 +1138,8 @@ try {
         -EvidencePayload $Evidence `
         -CuratedEvidence $CuratedEvidence `
         -Claim $Claim `
-        -Opportunity $Opportunity
+        -Opportunity $Opportunity `
+        -ProductChain $ProductChain
 }
 finally {
     $HttpClient.Dispose()

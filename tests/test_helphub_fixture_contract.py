@@ -58,6 +58,11 @@ def test_seed_script_uses_only_the_public_workflow_endpoints() -> None:
         "/v1/studies/$StudyId/claims",
         "/v1/claim-revisions/$($Claim.claim_revision_id)/reviews",
         "/v1/studies/$StudyId/opportunities",
+        "/v1/studies/$StudyId/agent-runs",
+        "/v1/tool-calls/$($WriteCall.id)/approvals",
+        "/v1/experiments/$ExperimentId/decisions",
+        "/v1/decisions/$($Decision.id)/prds",
+        "/v1/prds/$($Prd.id)",
     ):
         assert endpoint in script
 
@@ -65,3 +70,14 @@ def test_seed_script_uses_only_the_public_workflow_endpoints() -> None:
     assert "invoke-sqlcmd" not in lowered
     assert "psql" not in lowered
     assert "sqlalchemy" not in lowered
+
+
+def test_one_click_launcher_migrates_then_seeds_the_repeatable_demo() -> None:
+    launcher = (ROOT / "scripts" / "launch.ps1").read_text(encoding="utf-8-sig")
+    dev_script = (ROOT / "scripts" / "dev.ps1").read_text(encoding="utf-8-sig")
+
+    assert "alembic upgrade head" in dev_script
+    assert '"seed-helphub.ps1"' in launcher
+    assert "-ApiUrl $ApiUrl" in launcher
+    assert "-WebUrl $ProductUrl" in launcher
+    assert "[switch]$SkipSeed" in launcher

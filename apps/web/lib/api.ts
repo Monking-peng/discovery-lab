@@ -337,6 +337,314 @@ export type ContextManifest = {
   items: ContextManifestItem[];
 };
 
+export const EVALUATION_CASE_STATUSES = ["passed", "failed", "skipped"] as const;
+export type EvaluationCaseStatus = (typeof EVALUATION_CASE_STATUSES)[number];
+
+export type EvaluationCase = {
+  caseId: string;
+  status: EvaluationCaseStatus;
+  assertions: Record<string, boolean>;
+  details: Record<string, unknown>;
+};
+
+export type EvaluationSuite = {
+  schemaVersion: string;
+  dataset: string;
+  datasetRevision: number;
+  generatedAt: string;
+  summary: Record<string, unknown> & {
+    case_count: number;
+    passed: number;
+    failed: number;
+  };
+  cases: EvaluationCase[];
+};
+
+export type CurrentEvaluationReport = {
+  schemaVersion: "evaluation-report-index.v1";
+  generatedAt: string;
+  totalCases: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  releaseGatePassed: boolean;
+  datasetRevisions: Record<string, number>;
+  sourceToEvidence: EvaluationSuite;
+  evidenceToClaim: EvaluationSuite;
+};
+
+export const BAD_CASE_STAGES = [
+  "parse_source",
+  "extract_evidence",
+  "verify_citation",
+  "review_evidence",
+  "promote_claim",
+  "retrieve_context",
+  "tool_call",
+  "publish_artifact",
+] as const;
+export type BadCaseStage = (typeof BAD_CASE_STAGES)[number];
+export const BAD_CASE_SEVERITIES = ["low", "medium", "high", "critical"] as const;
+export type BadCaseSeverity = (typeof BAD_CASE_SEVERITIES)[number];
+
+export type BadCase = {
+  schemaVersion: "bad-case.v1";
+  id: string;
+  discoveredAt: string;
+  stage: BadCaseStage;
+  severity: BadCaseSeverity;
+  fixture: string;
+  symptom: string;
+  safeErrorCode: string;
+  rootCause: string;
+  resolution: string;
+  regressionTest: string;
+  recoveryVerified: boolean;
+  dataLoss: boolean;
+};
+
+export type BadCaseInbox = {
+  schemaVersion: "bad-case-inbox.v1";
+  generatedAt: string;
+  total: number;
+  unresolved: number;
+  items: BadCase[];
+};
+
+export type ToolDefinition = {
+  name: string;
+  version: string;
+  description: string;
+  accessMode: "read" | "write";
+  riskLevel: "low" | "medium" | "high";
+  requiresApproval: boolean;
+  serverAllowlisted: boolean;
+  mcpExposed: boolean;
+  inputSchema: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
+};
+
+export type ToolRegistry = {
+  schemaVersion: "tool-registry.v1";
+  policyVersion: "tool-policy.v1";
+  items: ToolDefinition[];
+};
+
+export type ToolApproval = {
+  id: string;
+  decision: "APPROVE" | "REJECT";
+  argumentsHash: string;
+  reviewer: string;
+  rationale: string;
+  clientRequestId: string;
+  createdAt: string;
+};
+
+export type AgentToolCall = {
+  id: string;
+  runId: string;
+  runStepId: string;
+  toolName: string;
+  toolVersion: string;
+  accessMode: "read" | "write";
+  riskLevel: "low" | "medium" | "high";
+  status: "RUNNING" | "APPROVAL_REQUIRED" | "SUCCEEDED" | "REJECTED" | "FAILED";
+  arguments: Record<string, unknown>;
+  argumentsHash: string;
+  result: Record<string, unknown> | null;
+  resultHash: string | null;
+  policySnapshot: Record<string, unknown>;
+  requiresApproval: boolean;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  approval: ToolApproval | null;
+};
+
+export type AgentRunContextManifest = {
+  id: string;
+  query: string;
+  purpose: RetrievalPurpose;
+  itemCount: number;
+  contentHash: string;
+  contextUrl: string;
+};
+
+export type AgentRun = {
+  id: string;
+  studyId: string;
+  workflowName: string;
+  workflowVersion: string;
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  phase: "WAITING_HUMAN" | "COMPLETED" | "FAILED" | "REJECTED";
+  goal: string;
+  claimRevisionId: string;
+  claimStatement: string;
+  contextManifest: AgentRunContextManifest;
+  promptProfile: Record<string, unknown>;
+  plan: Record<string, unknown>;
+  hypothesis: Record<string, unknown>;
+  outputSummary: Record<string, unknown>;
+  error: Record<string, unknown> | null;
+  inputHash: string;
+  clientRequestId: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  steps: RunStep[];
+  toolCalls: AgentToolCall[];
+};
+
+export type AgentRunInput = {
+  goal: string;
+  claimRevisionId: string;
+  retrieval: { query: string; purpose: RetrievalPurpose; limit: number };
+  requestedAction: {
+    toolName: "create_experiment_draft";
+    arguments: {
+      title: string;
+      primaryMetric: string;
+      successThreshold: string;
+      targetCohort: string;
+    };
+  };
+  clientRequestId: string;
+};
+
+export type ToolApprovalInput = {
+  decision: "APPROVE" | "REJECT";
+  argumentsHash: string;
+  reviewer: string;
+  rationale: string;
+  clientRequestId: string;
+};
+
+export type ProductHypothesis = {
+  id: string;
+  studyId: string;
+  runId: string;
+  claimId: string;
+  claimRevisionId: string;
+  contextManifestId: string;
+  status: "DRAFT";
+  statement: string;
+  expectedOutcome: string;
+  falsificationCriterion: string;
+  provenance: Record<string, unknown>;
+  contentHash: string;
+  createdAt: string;
+};
+
+export type ProductExperiment = {
+  id: string;
+  studyId: string;
+  hypothesisId: string;
+  toolCallId: string;
+  status: "DRAFT";
+  title: string;
+  targetCohort: string;
+  primaryMetric: string;
+  successThreshold: string;
+  provenance: Record<string, unknown>;
+  contentHash: string;
+  createdAt: string;
+};
+
+export type ProductDecision = {
+  id: string;
+  studyId: string;
+  experimentId: string;
+  decision: "PROCEED" | "ITERATE" | "STOP";
+  observedResult: string;
+  rationale: string;
+  decidedBy: string;
+  contentHash: string;
+  clientRequestId: string;
+  createdAt: string;
+};
+
+export type ProductDecisionInput = {
+  decision: ProductDecision["decision"];
+  observedResult: string;
+  rationale: string;
+  decidedBy: string;
+  clientRequestId: string;
+};
+
+export type PrdSection = {
+  body: string;
+  citationRefs: string[];
+};
+
+export type ClaimRevisionCitation = {
+  kind: "claim_revision";
+  citationId: string;
+  claimId: string;
+  claimRevisionId: string;
+  revision: number;
+  statement: string;
+  summary: string | null;
+  contentHash: string;
+  reviewId: string;
+  reviewDecision: "ACCEPT";
+  reviewReviewer: string;
+  contextUrl: string;
+};
+
+export type EvidenceRevisionCitation = {
+  kind: "evidence_revision";
+  citationId: string;
+  evidenceId: string;
+  evidenceRevisionId: string;
+  sourceId: string;
+  sourceRevisionId: string;
+  evidenceReviewId: string;
+  reviewDecision: "ACCEPT";
+  reviewReviewer: string;
+  evidenceContentHash: string;
+  sourceContentHash: string;
+  sourceName: string;
+  quote: string;
+  observation: string | null;
+  locator: Record<string, unknown>;
+  contextUrl: string;
+};
+
+export type PrdCitation = ClaimRevisionCitation | EvidenceRevisionCitation;
+
+export type PrdArtifact = {
+  id: string;
+  studyId: string;
+  decisionId: string;
+  title: string;
+  status: "DRAFT";
+  publishable: false;
+  sections: Record<string, PrdSection>;
+  citations: PrdCitation[];
+  publicationBlockers: string[];
+  contentHash: string;
+  clientRequestId: string;
+  createdAt: string;
+};
+
+export type PrdArtifactInput = {
+  title: string;
+  clientRequestId: string;
+};
+
+export type ProductArtifactChain = {
+  hypothesis: ProductHypothesis;
+  experiment: ProductExperiment;
+  decisions: ProductDecision[];
+  prds: PrdArtifact[];
+};
+
+export type ProductArtifactBundle = {
+  studyId: string;
+  totalExperiments: number;
+  items: ProductArtifactChain[];
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -504,6 +812,11 @@ function requiredRecord(value: unknown, field: string): Record<string, unknown> 
 
 function requiredString(value: unknown, field: string): string {
   return typeof value === "string" && value.trim() ? value : invalidResponse(field);
+}
+
+function requiredSha256(value: unknown, field: string): string {
+  const hash = requiredString(value, field);
+  return /^[0-9a-f]{64}$/.test(hash) ? hash : invalidResponse(field);
 }
 
 function requiredNumber(value: unknown, field: string): number {
@@ -807,6 +1120,565 @@ function normalizeContextManifest(value: unknown): ContextManifest {
   };
 }
 
+function requiredNonNegativeInteger(value: unknown, field: string): number {
+  const result = requiredNumber(value, field);
+  return Number.isInteger(result) && result >= 0 ? result : invalidResponse(field);
+}
+
+function normalizeEvaluationCase(value: unknown, index: number, fieldPrefix: string): EvaluationCase {
+  const field = `${fieldPrefix}.cases[${index}]`;
+  const item = requiredRecord(value, field);
+  const assertions = requiredRecord(item.assertions, `${field}.assertions`);
+  if (Object.values(assertions).some((entry) => typeof entry !== "boolean")) {
+    invalidResponse(`${field}.assertions`);
+  }
+  return {
+    caseId: requiredString(item.case_id, `${field}.case_id`),
+    status: requiredEnum(item.status, EVALUATION_CASE_STATUSES, `${field}.status`),
+    assertions: assertions as Record<string, boolean>,
+    details: requiredRecord(item.details, `${field}.details`),
+  };
+}
+
+function normalizeEvaluationSuite(value: unknown, field: string): EvaluationSuite {
+  const item = requiredRecord(value, field);
+  if (!Array.isArray(item.cases)) invalidResponse(`${field}.cases`);
+  const summary = requiredRecord(item.summary, `${field}.summary`);
+  const caseCount = requiredNonNegativeInteger(summary.case_count, `${field}.summary.case_count`);
+  const passed = requiredNonNegativeInteger(summary.passed, `${field}.summary.passed`);
+  const failed = requiredNonNegativeInteger(summary.failed, `${field}.summary.failed`);
+  const cases = item.cases.map((entry, index) => normalizeEvaluationCase(entry, index, field));
+  const skipped = cases.filter((entry) => entry.status === "skipped").length;
+  if (
+    cases.length !== caseCount
+    || cases.filter((entry) => entry.status === "passed").length !== passed
+    || cases.filter((entry) => entry.status === "failed").length !== failed
+    || passed + failed + skipped !== caseCount
+  ) {
+    invalidResponse(`${field}.summary`);
+  }
+  return {
+    schemaVersion: requiredString(item.schema_version, `${field}.schema_version`),
+    dataset: requiredString(item.dataset, `${field}.dataset`),
+    datasetRevision: requiredNonNegativeInteger(item.dataset_revision, `${field}.dataset_revision`),
+    generatedAt: requiredString(item.generated_at, `${field}.generated_at`),
+    summary: { ...summary, case_count: caseCount, passed, failed },
+    cases,
+  };
+}
+
+function normalizeCurrentEvaluationReport(value: unknown): CurrentEvaluationReport {
+  const item = requiredRecord(value, "evaluation_report");
+  const sourceToEvidence = normalizeEvaluationSuite(
+    item.source_to_evidence,
+    "evaluation_report.source_to_evidence",
+  );
+  const evidenceToClaim = normalizeEvaluationSuite(
+    item.evidence_to_claim,
+    "evaluation_report.evidence_to_claim",
+  );
+  const totalCases = requiredNonNegativeInteger(item.total_cases, "evaluation_report.total_cases");
+  const passed = requiredNonNegativeInteger(item.passed, "evaluation_report.passed");
+  const failed = requiredNonNegativeInteger(item.failed, "evaluation_report.failed");
+  const skipped = requiredNonNegativeInteger(item.skipped, "evaluation_report.skipped");
+  const suiteCases = [...sourceToEvidence.cases, ...evidenceToClaim.cases];
+  if (
+    suiteCases.length !== totalCases
+    || suiteCases.filter((entry) => entry.status === "passed").length !== passed
+    || suiteCases.filter((entry) => entry.status === "failed").length !== failed
+    || suiteCases.filter((entry) => entry.status === "skipped").length !== skipped
+  ) {
+    invalidResponse("evaluation_report.total_cases");
+  }
+  const releaseGatePassed = requiredBoolean(
+    item.release_gate_passed,
+    "evaluation_report.release_gate_passed",
+  );
+  if (releaseGatePassed !== (passed === totalCases && failed === 0 && skipped === 0)) {
+    invalidResponse("evaluation_report.release_gate_passed");
+  }
+  const rawRevisions = requiredRecord(
+    item.dataset_revisions,
+    "evaluation_report.dataset_revisions",
+  );
+  const datasetRevisions = Object.fromEntries(Object.entries(rawRevisions).map(([key, revision]) => [
+    key,
+    requiredNonNegativeInteger(revision, `evaluation_report.dataset_revisions.${key}`),
+  ]));
+  if (
+    datasetRevisions[sourceToEvidence.dataset] !== sourceToEvidence.datasetRevision
+    || datasetRevisions[evidenceToClaim.dataset] !== evidenceToClaim.datasetRevision
+  ) {
+    invalidResponse("evaluation_report.dataset_revisions");
+  }
+  return {
+    schemaVersion: requiredEnum(
+      item.schema_version,
+      ["evaluation-report-index.v1"] as const,
+      "evaluation_report.schema_version",
+    ),
+    generatedAt: requiredString(item.generated_at, "evaluation_report.generated_at"),
+    totalCases,
+    passed,
+    failed,
+    skipped,
+    releaseGatePassed,
+    datasetRevisions,
+    sourceToEvidence,
+    evidenceToClaim,
+  };
+}
+
+function normalizeBadCase(value: unknown, index: number): BadCase {
+  const field = `bad_case_inbox.items[${index}]`;
+  const item = requiredRecord(value, field);
+  return {
+    schemaVersion: requiredEnum(item.schema_version, ["bad-case.v1"] as const, `${field}.schema_version`),
+    id: requiredString(item.id, `${field}.id`),
+    discoveredAt: requiredString(item.discovered_at, `${field}.discovered_at`),
+    stage: requiredEnum(item.stage, BAD_CASE_STAGES, `${field}.stage`),
+    severity: requiredEnum(item.severity, BAD_CASE_SEVERITIES, `${field}.severity`),
+    fixture: requiredString(item.fixture, `${field}.fixture`),
+    symptom: requiredString(item.symptom, `${field}.symptom`),
+    safeErrorCode: requiredString(item.safe_error_code, `${field}.safe_error_code`),
+    rootCause: requiredString(item.root_cause, `${field}.root_cause`),
+    resolution: requiredString(item.resolution, `${field}.resolution`),
+    regressionTest: requiredString(item.regression_test, `${field}.regression_test`),
+    recoveryVerified: requiredBoolean(item.recovery_verified, `${field}.recovery_verified`),
+    dataLoss: requiredBoolean(item.data_loss, `${field}.data_loss`),
+  };
+}
+
+function normalizeBadCaseInbox(value: unknown): BadCaseInbox {
+  const item = requiredRecord(value, "bad_case_inbox");
+  if (!Array.isArray(item.items)) invalidResponse("bad_case_inbox.items");
+  const items = item.items.map(normalizeBadCase);
+  const total = requiredNonNegativeInteger(item.total, "bad_case_inbox.total");
+  const unresolved = requiredNonNegativeInteger(item.unresolved, "bad_case_inbox.unresolved");
+  if (
+    total !== items.length
+    || unresolved !== items.filter((entry) => !entry.recoveryVerified).length
+    || new Set(items.map((entry) => entry.id)).size !== items.length
+  ) {
+    invalidResponse("bad_case_inbox.total");
+  }
+  return {
+    schemaVersion: requiredEnum(
+      item.schema_version,
+      ["bad-case-inbox.v1"] as const,
+      "bad_case_inbox.schema_version",
+    ),
+    generatedAt: requiredString(item.generated_at, "bad_case_inbox.generated_at"),
+    total,
+    unresolved,
+    items,
+  };
+}
+
+function nullableRecord(value: unknown, field: string): Record<string, unknown> | null {
+  if (value === null) return null;
+  return requiredRecord(value, field);
+}
+
+function normalizeToolApproval(value: unknown, field: string): ToolApproval {
+  const item = requiredRecord(value, field);
+  return {
+    id: requiredString(item.id, `${field}.id`),
+    decision: requiredEnum(item.decision, ["APPROVE", "REJECT"] as const, `${field}.decision`),
+    argumentsHash: requiredString(item.arguments_hash, `${field}.arguments_hash`),
+    reviewer: requiredString(item.reviewer, `${field}.reviewer`),
+    rationale: requiredString(item.rationale, `${field}.rationale`),
+    clientRequestId: requiredString(item.client_request_id, `${field}.client_request_id`),
+    createdAt: requiredString(item.created_at, `${field}.created_at`),
+  };
+}
+
+function normalizeAgentToolCall(value: unknown, index: number, runId: string): AgentToolCall {
+  const field = `agent_run.tool_calls[${index}]`;
+  const item = requiredRecord(value, field);
+  const accessMode = requiredEnum(item.access_mode, ["read", "write"] as const, `${field}.access_mode`);
+  const status = requiredEnum(
+    item.status,
+    ["RUNNING", "APPROVAL_REQUIRED", "SUCCEEDED", "REJECTED", "FAILED"] as const,
+    `${field}.status`,
+  );
+  const requiresApproval = requiredBoolean(item.requires_approval, `${field}.requires_approval`);
+  const result = nullableRecord(item.result, `${field}.result`);
+  const resultHash = nullableString(item.result_hash, `${field}.result_hash`);
+  const approval = item.approval == null
+    ? null
+    : normalizeToolApproval(item.approval, `${field}.approval`);
+  const argumentsHash = requiredString(item.arguments_hash, `${field}.arguments_hash`);
+  if (requiredString(item.run_id, `${field}.run_id`) !== runId) invalidResponse(`${field}.run_id`);
+  if (accessMode === "read" && requiresApproval) invalidResponse(`${field}.requires_approval`);
+  if (accessMode === "write" && !requiresApproval) invalidResponse(`${field}.requires_approval`);
+  if (status === "APPROVAL_REQUIRED" && (result !== null || approval !== null)) {
+    invalidResponse(`${field}.status`);
+  }
+  if (status === "SUCCEEDED" && (result === null || resultHash === null)) {
+    invalidResponse(`${field}.result`);
+  }
+  if (approval && approval.argumentsHash !== argumentsHash) {
+    invalidResponse(`${field}.approval.arguments_hash`);
+  }
+  if (accessMode === "write" && result?.external_system_written !== undefined) {
+    if (result.external_system_written !== false) {
+      invalidResponse(`${field}.result.external_system_written`);
+    }
+  }
+  return {
+    id: requiredString(item.id, `${field}.id`),
+    runId,
+    runStepId: requiredString(item.run_step_id, `${field}.run_step_id`),
+    toolName: requiredString(item.tool_name, `${field}.tool_name`),
+    toolVersion: requiredString(item.tool_version, `${field}.tool_version`),
+    accessMode,
+    riskLevel: requiredEnum(item.risk_level, ["low", "medium", "high"] as const, `${field}.risk_level`),
+    status,
+    arguments: requiredRecord(item.arguments, `${field}.arguments`),
+    argumentsHash,
+    result,
+    resultHash,
+    policySnapshot: requiredRecord(item.policy_snapshot, `${field}.policy_snapshot`),
+    requiresApproval,
+    startedAt: nullableString(item.started_at, `${field}.started_at`),
+    completedAt: nullableString(item.completed_at, `${field}.completed_at`),
+    createdAt: requiredString(item.created_at, `${field}.created_at`),
+    approval,
+  };
+}
+
+function normalizeAgentRun(value: unknown): AgentRun {
+  const item = requiredRecord(value, "agent_run");
+  if (!Array.isArray(item.steps)) invalidResponse("agent_run.steps");
+  if (!Array.isArray(item.tool_calls)) invalidResponse("agent_run.tool_calls");
+  const id = requiredString(item.id, "agent_run.id");
+  const status = requiredEnum(
+    item.status,
+    ["RUNNING", "SUCCEEDED", "FAILED", "CANCELLED"] as const,
+    "agent_run.status",
+  );
+  const phase = requiredEnum(
+    item.phase,
+    ["WAITING_HUMAN", "COMPLETED", "FAILED", "REJECTED"] as const,
+    "agent_run.phase",
+  );
+  if (
+    (phase === "WAITING_HUMAN" && status !== "RUNNING")
+    || (phase === "COMPLETED" && status !== "SUCCEEDED")
+    || (phase === "FAILED" && status !== "FAILED")
+    || (phase === "REJECTED" && status !== "CANCELLED")
+  ) {
+    invalidResponse("agent_run.phase");
+  }
+  const manifest = requiredRecord(item.context_manifest, "agent_run.context_manifest");
+  const itemCount = requiredNonNegativeInteger(
+    manifest.item_count,
+    "agent_run.context_manifest.item_count",
+  );
+  const steps = item.steps.map(normalizeRunStep);
+  const toolCalls = item.tool_calls.map((entry, index) => normalizeAgentToolCall(entry, index, id));
+  if (phase === "WAITING_HUMAN" && !toolCalls.some((call) => call.status === "APPROVAL_REQUIRED")) {
+    invalidResponse("agent_run.tool_calls");
+  }
+  return {
+    id,
+    studyId: requiredString(item.study_id, "agent_run.study_id"),
+    workflowName: requiredString(item.workflow_name, "agent_run.workflow_name"),
+    workflowVersion: requiredString(item.workflow_version, "agent_run.workflow_version"),
+    status,
+    phase,
+    goal: requiredString(item.goal, "agent_run.goal"),
+    claimRevisionId: requiredString(item.claim_revision_id, "agent_run.claim_revision_id"),
+    claimStatement: requiredString(item.claim_statement, "agent_run.claim_statement"),
+    contextManifest: {
+      id: requiredString(manifest.id, "agent_run.context_manifest.id"),
+      query: requiredString(manifest.query, "agent_run.context_manifest.query"),
+      purpose: requiredEnum(
+        manifest.purpose,
+        RETRIEVAL_PURPOSES,
+        "agent_run.context_manifest.purpose",
+      ),
+      itemCount,
+      contentHash: requiredString(
+        manifest.content_hash,
+        "agent_run.context_manifest.content_hash",
+      ),
+      contextUrl: requiredString(manifest.context_url, "agent_run.context_manifest.context_url"),
+    },
+    promptProfile: requiredRecord(item.prompt_profile, "agent_run.prompt_profile"),
+    plan: requiredRecord(item.plan, "agent_run.plan"),
+    hypothesis: requiredRecord(item.hypothesis, "agent_run.hypothesis"),
+    outputSummary: requiredRecord(item.output_summary, "agent_run.output_summary"),
+    error: nullableRecord(item.error, "agent_run.error"),
+    inputHash: requiredString(item.input_hash, "agent_run.input_hash"),
+    clientRequestId: requiredString(item.client_request_id, "agent_run.client_request_id"),
+    startedAt: nullableString(item.started_at, "agent_run.started_at"),
+    completedAt: nullableString(item.completed_at, "agent_run.completed_at"),
+    createdAt: requiredString(item.created_at, "agent_run.created_at"),
+    steps,
+    toolCalls,
+  };
+}
+
+function normalizeToolRegistry(value: unknown): ToolRegistry {
+  const item = requiredRecord(value, "tool_registry");
+  if (!Array.isArray(item.items)) invalidResponse("tool_registry.items");
+  return {
+    schemaVersion: requiredEnum(
+      item.schema_version,
+      ["tool-registry.v1"] as const,
+      "tool_registry.schema_version",
+    ),
+    policyVersion: requiredEnum(
+      item.policy_version,
+      ["tool-policy.v1"] as const,
+      "tool_registry.policy_version",
+    ),
+    items: item.items.map((entry, index) => {
+      const field = `tool_registry.items[${index}]`;
+      const definition = requiredRecord(entry, field);
+      return {
+        name: requiredString(definition.name, `${field}.name`),
+        version: requiredString(definition.version, `${field}.version`),
+        description: requiredString(definition.description, `${field}.description`),
+        accessMode: requiredEnum(definition.access_mode, ["read", "write"] as const, `${field}.access_mode`),
+        riskLevel: requiredEnum(definition.risk_level, ["low", "medium", "high"] as const, `${field}.risk_level`),
+        requiresApproval: requiredBoolean(definition.requires_approval, `${field}.requires_approval`),
+        serverAllowlisted: requiredBoolean(definition.server_allowlisted, `${field}.server_allowlisted`),
+        mcpExposed: requiredBoolean(definition.mcp_exposed, `${field}.mcp_exposed`),
+        inputSchema: requiredRecord(definition.input_schema, `${field}.input_schema`),
+        outputSchema: requiredRecord(definition.output_schema, `${field}.output_schema`),
+      };
+    }),
+  };
+}
+
+function normalizeProductHypothesis(value: unknown, field: string): ProductHypothesis {
+  const item = requiredRecord(value, field);
+  return {
+    id: requiredString(item.id, `${field}.id`),
+    studyId: requiredString(item.study_id, `${field}.study_id`),
+    runId: requiredString(item.run_id, `${field}.run_id`),
+    claimId: requiredString(item.claim_id, `${field}.claim_id`),
+    claimRevisionId: requiredString(item.claim_revision_id, `${field}.claim_revision_id`),
+    contextManifestId: requiredString(item.context_manifest_id, `${field}.context_manifest_id`),
+    status: requiredEnum(item.status, ["DRAFT"] as const, `${field}.status`),
+    statement: requiredString(item.statement, `${field}.statement`),
+    expectedOutcome: requiredString(item.expected_outcome, `${field}.expected_outcome`),
+    falsificationCriterion: requiredString(
+      item.falsification_criterion,
+      `${field}.falsification_criterion`,
+    ),
+    provenance: requiredRecord(item.provenance, `${field}.provenance`),
+    contentHash: requiredSha256(item.content_hash, `${field}.content_hash`),
+    createdAt: requiredString(item.created_at, `${field}.created_at`),
+  };
+}
+
+function normalizeProductExperiment(value: unknown, field: string): ProductExperiment {
+  const item = requiredRecord(value, field);
+  return {
+    id: requiredString(item.id, `${field}.id`),
+    studyId: requiredString(item.study_id, `${field}.study_id`),
+    hypothesisId: requiredString(item.hypothesis_id, `${field}.hypothesis_id`),
+    toolCallId: requiredString(item.tool_call_id, `${field}.tool_call_id`),
+    status: requiredEnum(item.status, ["DRAFT"] as const, `${field}.status`),
+    title: requiredString(item.title, `${field}.title`),
+    targetCohort: requiredString(item.target_cohort, `${field}.target_cohort`),
+    primaryMetric: requiredString(item.primary_metric, `${field}.primary_metric`),
+    successThreshold: requiredString(item.success_threshold, `${field}.success_threshold`),
+    provenance: requiredRecord(item.provenance, `${field}.provenance`),
+    contentHash: requiredSha256(item.content_hash, `${field}.content_hash`),
+    createdAt: requiredString(item.created_at, `${field}.created_at`),
+  };
+}
+
+function normalizeProductDecision(value: unknown, field = "product_decision"): ProductDecision {
+  const item = requiredRecord(value, field);
+  return {
+    id: requiredString(item.id, `${field}.id`),
+    studyId: requiredString(item.study_id, `${field}.study_id`),
+    experimentId: requiredString(item.experiment_id, `${field}.experiment_id`),
+    decision: requiredEnum(
+      item.decision,
+      ["PROCEED", "ITERATE", "STOP"] as const,
+      `${field}.decision`,
+    ),
+    observedResult: requiredString(item.observed_result, `${field}.observed_result`),
+    rationale: requiredString(item.rationale, `${field}.rationale`),
+    decidedBy: requiredString(item.decided_by, `${field}.decided_by`),
+    contentHash: requiredSha256(item.content_hash, `${field}.content_hash`),
+    clientRequestId: requiredString(item.client_request_id, `${field}.client_request_id`),
+    createdAt: requiredString(item.created_at, `${field}.created_at`),
+  };
+}
+
+function normalizePrdCitation(value: unknown, index: number, field: string): PrdCitation {
+  const citationField = `${field}.citations[${index}]`;
+  const item = requiredRecord(value, citationField);
+  const kind = requiredEnum(
+    item.kind,
+    ["claim_revision", "evidence_revision"] as const,
+    `${citationField}.kind`,
+  );
+  const citationId = requiredString(item.citation_id, `${citationField}.citation_id`);
+  const reviewDecision = requiredEnum(
+    item.review_decision,
+    ["ACCEPT"] as const,
+    `${citationField}.review_decision`,
+  );
+  const contextUrl = requiredString(item.context_url, `${citationField}.context_url`);
+  if (kind === "claim_revision") {
+    const claimRevisionId = requiredString(item.revision_id, `${citationField}.revision_id`);
+    const revision = requiredNumber(item.revision, `${citationField}.revision`);
+    if (!Number.isInteger(revision) || revision < 1) invalidResponse(`${citationField}.revision`);
+    if (!contextUrl.includes(`claim_revision_id=${claimRevisionId}`)) {
+      invalidResponse(`${citationField}.context_url`);
+    }
+    return {
+      kind,
+      citationId,
+      claimId: requiredString(item.claim_id, `${citationField}.claim_id`),
+      claimRevisionId,
+      revision,
+      statement: requiredString(item.statement, `${citationField}.statement`),
+      summary: nullableString(item.summary, `${citationField}.summary`),
+      contentHash: requiredSha256(item.content_hash, `${citationField}.content_hash`),
+      reviewId: requiredString(item.review_id, `${citationField}.review_id`),
+      reviewDecision,
+      reviewReviewer: requiredString(item.review_reviewer, `${citationField}.review_reviewer`),
+      contextUrl,
+    };
+  }
+  const evidenceRevisionId = requiredString(item.revision_id, `${citationField}.revision_id`);
+  if (!contextUrl.includes(`evidence_revision_id=${evidenceRevisionId}`)) {
+    invalidResponse(`${citationField}.context_url`);
+  }
+  return {
+    kind,
+    citationId,
+    evidenceId: requiredString(item.evidence_id, `${citationField}.evidence_id`),
+    evidenceRevisionId,
+    sourceId: requiredString(item.source_id, `${citationField}.source_id`),
+    sourceRevisionId: requiredString(item.source_revision_id, `${citationField}.source_revision_id`),
+    evidenceReviewId: requiredString(item.evidence_review_id, `${citationField}.evidence_review_id`),
+    reviewDecision,
+    reviewReviewer: requiredString(item.review_reviewer, `${citationField}.review_reviewer`),
+    evidenceContentHash: requiredSha256(
+      item.evidence_content_hash,
+      `${citationField}.evidence_content_hash`,
+    ),
+    sourceContentHash: requiredSha256(
+      item.source_content_hash,
+      `${citationField}.source_content_hash`,
+    ),
+    sourceName: requiredString(item.source_name, `${citationField}.source_name`),
+    quote: requiredString(item.quote, `${citationField}.quote`),
+    observation: nullableString(item.observation, `${citationField}.observation`),
+    locator: requiredRecord(item.locator, `${citationField}.locator`),
+    contextUrl,
+  };
+}
+
+function normalizePrd(value: unknown, field = "prd"): PrdArtifact {
+  const item = requiredRecord(value, field);
+  if (requiredBoolean(item.publishable, `${field}.publishable`) !== false) {
+    invalidResponse(`${field}.publishable`);
+  }
+  const blockerField = `${field}.publication_blockers`;
+  const publicationBlockers = requiredStringList(item.publication_blockers, blockerField);
+  const expectedBlockers = [
+    "PRD_REQUIRES_FINAL_REVIEW",
+    "EXTERNAL_PUBLICATION_NOT_IMPLEMENTED",
+  ];
+  if (
+    publicationBlockers.length !== expectedBlockers.length
+    || publicationBlockers.some((entry, index) => entry !== expectedBlockers[index])
+  ) {
+    invalidResponse(blockerField);
+  }
+  const rawSections = requiredRecord(item.sections, `${field}.sections`);
+  const sections = Object.fromEntries(Object.entries(rawSections).map(([name, rawSection]) => {
+    const sectionField = `${field}.sections.${name}`;
+    const section = requiredRecord(rawSection, sectionField);
+    return [name, {
+      body: requiredString(section.body, `${sectionField}.body`),
+      citationRefs: requiredStringList(section.citation_refs, `${sectionField}.citation_refs`),
+    } satisfies PrdSection];
+  }));
+  if (!Array.isArray(item.citations)) invalidResponse(`${field}.citations`);
+  const citations = item.citations.map((entry, index) => normalizePrdCitation(entry, index, field));
+  if (!citations.some((citation) => citation.kind === "claim_revision")) {
+    invalidResponse(`${field}.citations`);
+  }
+  const citationIds = new Set(citations.map((citation) => citation.citationId));
+  if (
+    citationIds.size !== citations.length
+    || Object.values(sections).some((section) => (
+      section.citationRefs.some((citationId) => !citationIds.has(citationId))
+    ))
+  ) {
+    invalidResponse(`${field}.sections`);
+  }
+  return {
+    id: requiredString(item.id, `${field}.id`),
+    studyId: requiredString(item.study_id, `${field}.study_id`),
+    decisionId: requiredString(item.decision_id, `${field}.decision_id`),
+    title: requiredString(item.title, `${field}.title`),
+    status: requiredEnum(item.status, ["DRAFT"] as const, `${field}.status`),
+    publishable: false,
+    sections,
+    citations,
+    publicationBlockers,
+    contentHash: requiredSha256(item.content_hash, `${field}.content_hash`),
+    clientRequestId: requiredString(item.client_request_id, `${field}.client_request_id`),
+    createdAt: requiredString(item.created_at, `${field}.created_at`),
+  };
+}
+
+function normalizeProductArtifactBundle(value: unknown): ProductArtifactBundle {
+  const item = requiredRecord(value, "product_artifacts");
+  const studyId = requiredString(item.study_id, "product_artifacts.study_id");
+  if (!Array.isArray(item.items)) invalidResponse("product_artifacts.items");
+  const items = item.items.map((entry, index): ProductArtifactChain => {
+    const field = `product_artifacts.items[${index}]`;
+    const chain = requiredRecord(entry, field);
+    const hypothesis = normalizeProductHypothesis(chain.hypothesis, `${field}.hypothesis`);
+    const experiment = normalizeProductExperiment(chain.experiment, `${field}.experiment`);
+    if (!Array.isArray(chain.decisions)) invalidResponse(`${field}.decisions`);
+    if (!Array.isArray(chain.prds)) invalidResponse(`${field}.prds`);
+    const decisions = chain.decisions.map((value, decisionIndex) => (
+      normalizeProductDecision(value, `${field}.decisions[${decisionIndex}]`)
+    ));
+    const prds = chain.prds.map((value, prdIndex) => (
+      normalizePrd(value, `${field}.prds[${prdIndex}]`)
+    ));
+    if (
+      hypothesis.studyId !== studyId
+      || experiment.studyId !== studyId
+      || experiment.hypothesisId !== hypothesis.id
+      || decisions.some((decision) => (
+        decision.studyId !== studyId || decision.experimentId !== experiment.id
+      ))
+      || prds.some((prd) => (
+        prd.studyId !== studyId || !decisions.some((decision) => decision.id === prd.decisionId)
+      ))
+    ) {
+      invalidResponse(`${field}.lineage`);
+    }
+    return { hypothesis, experiment, decisions, prds };
+  });
+  const totalExperiments = requiredNonNegativeInteger(
+    item.total_experiments,
+    "product_artifacts.total_experiments",
+  );
+  if (totalExperiments !== items.length || new Set(items.map((chain) => chain.experiment.id)).size !== items.length) {
+    invalidResponse("product_artifacts.total_experiments");
+  }
+  return { studyId, totalExperiments, items };
+}
+
 function normalizeRunStep(value: unknown): RunStep {
   const item = isRecord(value) ? value : {};
   const status = normalizeStatus(
@@ -968,6 +1840,133 @@ function opportunityInputPayload(input: OpportunityDraftInput): Record<string, u
 }
 
 export const api = {
+  async getToolRegistry(): Promise<ToolRegistry> {
+    return normalizeToolRegistry(await request<unknown>("/v1/tools"));
+  },
+
+  async getAgentRuns(studyId: string, limit = 50): Promise<ListResult<AgentRun>> {
+    const safeLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+    const payload = await request<unknown>(
+      `/v1/studies/${encodeURIComponent(studyId)}/agent-runs?limit=${safeLimit}`,
+    );
+    if (!isRecord(payload) || !Array.isArray(payload.items)) invalidResponse("agent_runs.items");
+    const items = payload.items.map(normalizeAgentRun);
+    if (items.some((run) => run.studyId !== studyId)) invalidResponse("agent_runs.study_id");
+    return { items, total: requiredNonNegativeInteger(payload.total, "agent_runs.total") };
+  },
+
+  async getAgentRun(runId: string): Promise<AgentRun> {
+    const run = normalizeAgentRun(await request<unknown>(`/v1/agent-runs/${encodeURIComponent(runId)}`));
+    if (run.id !== runId) invalidResponse("agent_run.id");
+    return run;
+  },
+
+  async createAgentRun(studyId: string, input: AgentRunInput): Promise<AgentRun> {
+    const run = normalizeAgentRun(await request<unknown>(
+      `/v1/studies/${encodeURIComponent(studyId)}/agent-runs`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          goal: input.goal,
+          claim_revision_id: input.claimRevisionId,
+          retrieval: input.retrieval,
+          requested_action: {
+            tool_name: input.requestedAction.toolName,
+            arguments: {
+              title: input.requestedAction.arguments.title,
+              primary_metric: input.requestedAction.arguments.primaryMetric,
+              success_threshold: input.requestedAction.arguments.successThreshold,
+              target_cohort: input.requestedAction.arguments.targetCohort,
+            },
+          },
+          client_request_id: input.clientRequestId,
+        }),
+      },
+      30000,
+    ));
+    if (run.studyId !== studyId || run.claimRevisionId !== input.claimRevisionId) {
+      invalidResponse("agent_run.request_lineage");
+    }
+    return run;
+  },
+
+  async approveToolCall(toolCallId: string, input: ToolApprovalInput): Promise<AgentRun> {
+    return normalizeAgentRun(await request<unknown>(
+      `/v1/tool-calls/${encodeURIComponent(toolCallId)}/approvals`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          decision: input.decision,
+          arguments_hash: input.argumentsHash,
+          reviewer: input.reviewer,
+          rationale: input.rationale,
+          client_request_id: input.clientRequestId,
+        }),
+      },
+      30000,
+    ));
+  },
+
+  async getProductArtifacts(studyId: string): Promise<ProductArtifactBundle> {
+    const bundle = normalizeProductArtifactBundle(await request<unknown>(
+      `/v1/studies/${encodeURIComponent(studyId)}/product-artifacts`,
+    ));
+    if (bundle.studyId !== studyId) invalidResponse("product_artifacts.study_id");
+    return bundle;
+  },
+
+  async createProductDecision(
+    experimentId: string,
+    input: ProductDecisionInput,
+  ): Promise<ProductDecision> {
+    const decision = normalizeProductDecision(await request<unknown>(
+      `/v1/experiments/${encodeURIComponent(experimentId)}/decisions`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          decision: input.decision,
+          observed_result: input.observedResult,
+          rationale: input.rationale,
+          decided_by: input.decidedBy,
+          client_request_id: input.clientRequestId,
+        }),
+      },
+    ));
+    if (decision.experimentId !== experimentId) invalidResponse("product_decision.experiment_id");
+    return decision;
+  },
+
+  async createPrd(decisionId: string, input: PrdArtifactInput): Promise<PrdArtifact> {
+    const prd = normalizePrd(await request<unknown>(
+      `/v1/decisions/${encodeURIComponent(decisionId)}/prds`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          title: input.title,
+          client_request_id: input.clientRequestId,
+        }),
+      },
+    ));
+    if (prd.decisionId !== decisionId) invalidResponse("prd.decision_id");
+    return prd;
+  },
+
+  async getPrd(prdId: string): Promise<PrdArtifact> {
+    const prd = normalizePrd(await request<unknown>(`/v1/prds/${encodeURIComponent(prdId)}`));
+    if (prd.id !== prdId) invalidResponse("prd.id");
+    return prd;
+  },
+
+  async getCurrentEvaluationReport(): Promise<CurrentEvaluationReport> {
+    return normalizeCurrentEvaluationReport(
+      await request<unknown>("/v1/evaluation/reports/current", undefined, 30000),
+    );
+  },
+
+  async getBadCases(): Promise<BadCaseInbox> {
+    return normalizeBadCaseInbox(await request<unknown>("/v1/evaluation/bad-cases"));
+  },
+
   async getStudies(): Promise<Study[]> {
     return listPayload(await request<unknown>("/v1/studies")).map(normalizeStudy);
   },

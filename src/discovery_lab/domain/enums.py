@@ -85,3 +85,16 @@ class RunStepStatus(StrEnum):
     FAILED = "FAILED"
     SKIPPED = "SKIPPED"
     CANCELLED = "CANCELLED"
+
+
+class ToolCallStatus(StrEnum):
+    RUNNING = "RUNNING"
+    APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
+    SUCCEEDED = "SUCCEEDED"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+
+
+class ToolApprovalDecision(StrEnum):
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"

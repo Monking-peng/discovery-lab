@@ -125,6 +125,34 @@ afterEach(() => {
 });
 
 describe("DiscoveryWorkbench navigation and locale integration", () => {
+  it("opens the most substantial study instead of a newer empty smoke-test study", async () => {
+    const emptySmokeStudy: Study = {
+      ...study,
+      id: "study-empty-smoke",
+      revisionId: "study-empty-smoke-revision-1",
+      title: "Vector smoke test",
+      sourceCount: 0,
+      evidenceCount: 0,
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    };
+    const completeDemoStudy: Study = {
+      ...study,
+      id: "study-complete-demo",
+      revisionId: "study-complete-demo-revision-1",
+      title: "HelpHub complete product chain",
+      sourceCount: 2,
+      evidenceCount: 31,
+      updatedAt: "2026-07-15T00:00:00.000Z",
+    };
+    apiMocks.getStudies.mockResolvedValue([emptySmokeStudy, completeDemoStudy]);
+
+    render(<DiscoveryWorkbench />);
+
+    await waitFor(() => expect(apiMocks.getEvidence).toHaveBeenCalledWith(completeDemoStudy.id));
+    expect(screen.getByRole("button", { name: /HelpHub complete product chain/ }))
+      .toHaveAttribute("aria-pressed", "true");
+  });
+
   it("opens Claims & Opportunities from #claims and exposes the active page to assistive technology", async () => {
     window.history.replaceState(null, "", "/#claims");
 
