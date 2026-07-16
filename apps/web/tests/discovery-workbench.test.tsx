@@ -223,6 +223,37 @@ describe("DiscoveryWorkbench navigation and locale integration", () => {
     expect(within(detail).getByText(context.highlight)).toBeVisible();
   });
 
+  it("keeps source management and RAG behind explicit progressive disclosures", async () => {
+    const user = userEvent.setup();
+    await renderLiveWorkbench();
+
+    const sourcesRegion = screen.getByRole("region", {
+      name: message("en", "sources.title"),
+    });
+    const manageSources = within(sourcesRegion).getByRole("button", {
+      name: message("en", "sources.manage"),
+    });
+    const ragToggle = screen.getByRole("button", {
+      name: message("en", "retrieval.shortTitle"),
+    });
+
+    expect(manageSources).toHaveAttribute("aria-expanded", "false");
+    expect(ragToggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(sourcesRegion).queryByText(message("en", "sources.manageHelp")))
+      .not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: message("en", "retrieval.title") }))
+      .not.toBeInTheDocument();
+
+    await user.click(manageSources);
+    expect(within(sourcesRegion).getByText(message("en", "sources.manageHelp"))).toBeVisible();
+    expect(within(sourcesRegion).getByRole("button", { name: message("en", "general.close") }))
+      .toHaveAttribute("aria-expanded", "true");
+
+    await user.click(ragToggle);
+    expect(screen.getByRole("heading", { name: message("en", "retrieval.title") })).toBeVisible();
+    expect(ragToggle).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("initializes from the saved locale, switches language, and persists the new choice", async () => {
     window.localStorage.setItem(LOCALE_STORAGE_KEY, "zh-CN");
     render(<DiscoveryWorkbench />);

@@ -11,6 +11,7 @@ import {
   ChevronDown,
   CircleDashed,
   Clock3,
+  DatabaseZap,
   FileArchive,
   FileCheck2,
   FileSpreadsheet,
@@ -458,6 +459,8 @@ export function DiscoveryWorkbench() {
   const [contextError, setContextError] = useState("");
   const [search, setSearch] = useState("");
   const [kindFilter, setKindFilter] = useState<Evidence["kind"] | "all">("all");
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [retrievalExpanded, setRetrievalExpanded] = useState(false);
   const [dragActive, setDragActive] = useState(false);
   const [uploadNotice, setUploadNotice] = useState("");
   const [showNewStudy, setShowNewStudy] = useState(false);
@@ -1040,7 +1043,10 @@ export function DiscoveryWorkbench() {
       <aside className="sidebar">
         <div className="brand-row">
           <span className="brand-mark"><Sparkles size={17} strokeWidth={2.2} /></span>
-          <span className="brand-name">Discovery Lab</span>
+          <span className="brand-copy">
+            <strong className="brand-name">Discovery Lab</strong>
+            <small>{t("sidebar.brandTagline")}</small>
+          </span>
           <button className="icon-button sidebar-more" aria-label={t("sidebar.menu")}><ChevronDown size={15} /></button>
         </div>
 
@@ -1179,93 +1185,123 @@ export function DiscoveryWorkbench() {
                   </div>
                 </article>
 
-                <section className="sources-section" aria-labelledby="sources-title">
-                  <div className="section-heading">
-                    <div>
-                      <h2 id="sources-title">{t("sources.title")}</h2>
-                      <span>{visibleSourcesLoading ? t("sources.loading") : t("sources.inStudy", { count: visibleSourceTotal })}</span>
-                    </div>
-                    {mode === "live" ? (
-                      <button className="icon-button" aria-label={t("sources.refresh")} onClick={() => void loadLiveStudyData(selectedStudy.id)}>
-                        <RefreshCw size={15} />
-                      </button>
-                    ) : (
-                      <button className="icon-button" aria-label={t("sources.more")}><MoreHorizontal size={17} /></button>
-                    )}
-                  </div>
-
-                  <div
-                    className={`dropzone ${dragActive ? "drag-active" : ""} ${mode === "demo" ? "preview-disabled" : ""}`}
-                    onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDragLeave={(event) => { event.preventDefault(); setDragActive(false); }}
-                    onDrop={(event) => { event.preventDefault(); void handleFile(event.dataTransfer.files[0]); }}
-                  >
-                    <input
-                      ref={fileInputRef}
-                      id="source-upload"
-                      type="file"
-                      accept=".pdf,.csv,.txt,.md,text/plain,text/markdown,text/csv,application/pdf"
-                      disabled={mode === "demo"}
-                      onChange={(event) => void handleFile(event.target.files?.[0])}
-                    />
-                    <div className="dropzone-icon"><UploadCloud size={19} /></div>
-                    <div className="dropzone-copy">
-                      <strong>{mode === "demo" ? t("sources.uploadDisabled") : t("sources.drop")}</strong>
-                      <span>{t("sources.formats")}</span>
-                    </div>
-                    <label className="secondary-button" htmlFor="source-upload" aria-disabled={mode === "demo"}>{t("sources.choose")}</label>
-                  </div>
-                  {uploadNotice && <div className="upload-notice" role="status">{uploadNotice}</div>}
-
-                  <div className="source-list">
-                    {visibleSourcesLoading ? (
-                      <div className="list-loading source-loading" role="status"><LoaderCircle className="spin" size={16} />{t("sources.loadingList")}</div>
-                    ) : visibleSourcesError ? (
-                      <div className="inline-error compact" role="alert">
-                        <AlertCircle size={16} />
-                        <div><strong>{t("sources.loadFailed")}</strong><span>{visibleSourcesError}</span></div>
-                        <button className="text-button" onClick={() => void loadLiveStudyData(selectedStudy.id)}>{t("general.retry")}</button>
+                <section className={`sources-section evidence-disclosure ${sourcesExpanded ? "expanded" : ""}`} aria-labelledby="sources-title">
+                  <div className="section-heading disclosure-heading">
+                    <div className="section-heading-copy">
+                      <span className="section-index">01</span>
+                      <div>
+                        <h2 id="sources-title">{t("sources.title")}</h2>
+                        <span>{visibleSourcesLoading ? t("sources.loading") : t("sources.inStudy", { count: visibleSourceTotal })}</span>
                       </div>
-                    ) : sources.map((source) => {
-                      const SourceIcon = fileIcon(source.type);
-                      return (
-                        <div className="source-row" key={source.id}>
-                          <span className="source-icon"><SourceIcon size={17} /></span>
-                          <div className="source-copy">
-                            <strong>{source.name}</strong>
-                            <span>{source.type}{source.revision ? ` · ${t("sources.revision", { revision: source.revision })}` : ""}</span>
-                            {(source.status === "processing" || source.status === "uploading") && (
-                              <span className="progress-track" aria-label={t("sources.progress", { progress: source.progress ?? 0 })}>
-                                <span style={{ width: `${source.progress ?? 35}%` }} />
-                              </span>
-                            )}
-                          </div>
-                          <span className={`source-state ${source.status}`}>
-                            {source.status === "ready" && <CheckCircle2 size={13} />}
-                            {(source.status === "processing" || source.status === "uploading") && <LoaderCircle className="spin" size={13} />}
-                            {source.status === "failed" && <AlertCircle size={13} />}
-                            {source.status === "processing"
-                              ? `${t("sourceStatus.processing")} ${source.progress ?? 0}%`
-                              : t(`sourceStatus.${source.status}` as MessageKey)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                    {!visibleSourcesLoading && !visibleSourcesError && sources.length === 0 && (
-                      <p className="section-empty">{t("sources.empty")}</p>
-                    )}
+                    </div>
+                    <button
+                      type="button"
+                      className="disclosure-button"
+                      aria-expanded={sourcesExpanded}
+                      onClick={() => setSourcesExpanded((current) => !current)}
+                    >
+                      {t(sourcesExpanded ? "general.close" : "sources.manage")}
+                      <ChevronDown size={16} aria-hidden="true" />
+                    </button>
                   </div>
+
+                  {sourcesExpanded && (
+                    <div className="disclosure-body">
+                      <div className="disclosure-tools">
+                        <p>{t("sources.manageHelp")}</p>
+                        {mode === "live" ? (
+                          <button className="icon-button" aria-label={t("sources.refresh")} onClick={() => void loadLiveStudyData(selectedStudy.id)}>
+                            <RefreshCw size={15} />
+                          </button>
+                        ) : null}
+                      </div>
+                      <div
+                        className={`dropzone ${dragActive ? "drag-active" : ""} ${mode === "demo" ? "preview-disabled" : ""}`}
+                        onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
+                        onDragOver={(event) => event.preventDefault()}
+                        onDragLeave={(event) => { event.preventDefault(); setDragActive(false); }}
+                        onDrop={(event) => { event.preventDefault(); void handleFile(event.dataTransfer.files[0]); }}
+                      >
+                        <input
+                          ref={fileInputRef}
+                          id="source-upload"
+                          type="file"
+                          accept=".pdf,.csv,.txt,.md,text/plain,text/markdown,text/csv,application/pdf"
+                          disabled={mode === "demo"}
+                          onChange={(event) => void handleFile(event.target.files?.[0])}
+                        />
+                        <div className="dropzone-icon"><UploadCloud size={19} /></div>
+                        <div className="dropzone-copy">
+                          <strong>{mode === "demo" ? t("sources.uploadDisabled") : t("sources.drop")}</strong>
+                          <span>{t("sources.formats")}</span>
+                        </div>
+                        <label className="secondary-button" htmlFor="source-upload" aria-disabled={mode === "demo"}>{t("sources.choose")}</label>
+                      </div>
+                      {uploadNotice && <div className="upload-notice" role="status">{uploadNotice}</div>}
+
+                      <div className="source-list">
+                        {visibleSourcesLoading ? (
+                          <div className="list-loading source-loading" role="status"><LoaderCircle className="spin" size={16} />{t("sources.loadingList")}</div>
+                        ) : visibleSourcesError ? (
+                          <div className="inline-error compact" role="alert">
+                            <AlertCircle size={16} />
+                            <div><strong>{t("sources.loadFailed")}</strong><span>{visibleSourcesError}</span></div>
+                            <button className="text-button" onClick={() => void loadLiveStudyData(selectedStudy.id)}>{t("general.retry")}</button>
+                          </div>
+                        ) : sources.map((source) => {
+                          const SourceIcon = fileIcon(source.type);
+                          return (
+                            <div className="source-row" key={source.id}>
+                              <span className="source-icon"><SourceIcon size={17} /></span>
+                              <div className="source-copy">
+                                <strong>{source.name}</strong>
+                                <span>{source.type}{source.revision ? ` · ${t("sources.revision", { revision: source.revision })}` : ""}</span>
+                                {(source.status === "processing" || source.status === "uploading") && (
+                                  <span className="progress-track" aria-label={t("sources.progress", { progress: source.progress ?? 0 })}>
+                                    <span style={{ width: `${source.progress ?? 35}%` }} />
+                                  </span>
+                                )}
+                              </div>
+                              <span className={`source-state ${source.status}`}>
+                                {source.status === "ready" && <CheckCircle2 size={13} />}
+                                {(source.status === "processing" || source.status === "uploading") && <LoaderCircle className="spin" size={13} />}
+                                {source.status === "failed" && <AlertCircle size={13} />}
+                                {source.status === "processing"
+                                  ? `${t("sourceStatus.processing")} ${source.progress ?? 0}%`
+                                  : t(`sourceStatus.${source.status}` as MessageKey)}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {!visibleSourcesLoading && !visibleSourcesError && sources.length === 0 && (
+                          <p className="section-empty">{t("sources.empty")}</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </section>
 
                 <section className="evidence-section" aria-labelledby="evidence-list-title">
                   <div className="section-heading evidence-heading">
-                    <div><h2 id="evidence-list-title">{t("evidence.title")}</h2><span>{t("evidence.count", { visible: filteredEvidence.length, total: evidence.length })}</span></div>
-                    {mode === "live" && (
-                      <button className="icon-button" aria-label={t("evidence.refresh")} onClick={() => void loadLiveEvidence(selectedStudy.id)}>
-                        <RefreshCw size={15} />
+                    <div className="section-heading-copy">
+                      <span className="section-index">02</span>
+                      <div><h2 id="evidence-list-title">{t("evidence.title")}</h2><span>{t("evidence.count", { visible: filteredEvidence.length, total: evidence.length })}</span></div>
+                    </div>
+                    <div className="section-actions">
+                      <button
+                        type="button"
+                        className={`rag-toggle ${retrievalExpanded ? "active" : ""}`}
+                        aria-expanded={retrievalExpanded}
+                        onClick={() => setRetrievalExpanded((current) => !current)}
+                      >
+                        <DatabaseZap size={15} />{t("retrieval.shortTitle")}<ChevronDown size={15} aria-hidden="true" />
                       </button>
-                    )}
+                      {mode === "live" && (
+                        <button className="icon-button" aria-label={t("evidence.refresh")} onClick={() => void loadLiveEvidence(selectedStudy.id)}>
+                          <RefreshCw size={15} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div className="evidence-tools">
                     <label className="search-box">
@@ -1284,15 +1320,19 @@ export function DiscoveryWorkbench() {
                     </label>
                   </div>
 
-                  <RetrievalLab
-                    key={selectedStudy.id}
-                    studyId={selectedStudy.id}
-                    live={mode === "live"}
-                    t={t}
-                    onOpenEvidenceRevision={(evidenceId, revisionId, sourceRevisionId) => (
-                      openEvidenceRevisionFromClaim(evidenceId, revisionId, sourceRevisionId)
-                    )}
-                  />
+                  {retrievalExpanded && (
+                    <div className="rag-disclosure-panel">
+                      <RetrievalLab
+                        key={selectedStudy.id}
+                        studyId={selectedStudy.id}
+                        live={mode === "live"}
+                        t={t}
+                        onOpenEvidenceRevision={(evidenceId, revisionId, sourceRevisionId) => (
+                          openEvidenceRevisionFromClaim(evidenceId, revisionId, sourceRevisionId)
+                        )}
+                      />
+                    </div>
+                  )}
 
                   {visibleEvidenceLoading ? (
                     <div className="list-loading" role="status"><LoaderCircle className="spin" size={18} />{t("evidence.loading")}</div>
