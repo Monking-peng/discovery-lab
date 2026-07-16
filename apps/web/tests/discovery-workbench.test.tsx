@@ -105,6 +105,7 @@ function primeLiveApi() {
 }
 
 async function renderLiveWorkbench() {
+  if (!window.location.hash) window.history.replaceState(null, "", "/#evidence");
   render(<DiscoveryWorkbench />);
   await screen.findByRole("button", { name: message("en", "nav.evidence") });
   await waitFor(() => expect(apiMocks.getEvidence).toHaveBeenCalledWith(study.id));
@@ -125,6 +126,22 @@ afterEach(() => {
 });
 
 describe("DiscoveryWorkbench navigation and locale integration", () => {
+  it("lands on a focused product overview before exposing the dense workbench", async () => {
+    render(<DiscoveryWorkbench />);
+
+    expect(await screen.findByRole("heading", {
+      name: "From raw research to a decision you can defend.",
+    })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Overview" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(screen.getByRole("heading", { name: "How to use Discovery Lab" })).toBeVisible();
+    expect(screen.getAllByTestId("overview-step")).toHaveLength(5);
+    expect(screen.getAllByRole("button", { name: "Explore evidence" })[0]).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Open final PRD" })[0]).toBeVisible();
+  });
+
   it("opens the most substantial study instead of a newer empty smoke-test study", async () => {
     const emptySmokeStudy: Study = {
       ...study,
@@ -185,6 +202,25 @@ describe("DiscoveryWorkbench navigation and locale integration", () => {
     expect(evidenceNavigation).not.toHaveAttribute("aria-current");
     expect(window.location.hash).toBe("#claims");
     expect(screen.getByRole("heading", { name: message("en", "claims.heroTitle") })).toBeVisible();
+  });
+
+  it("progressively reveals evidence review and source trace instead of showing everything at once", async () => {
+    const user = userEvent.setup();
+    await renderLiveWorkbench();
+    const detail = screen.getByRole("complementary", { name: message("en", "detail.region") });
+
+    expect(within(detail).getByRole("tab", { name: "Summary" })).toHaveAttribute("aria-selected", "true");
+    expect(within(detail).getByText(`“${evidence.quote}”`)).toBeVisible();
+    expect(within(detail).queryByLabelText(message("en", "evidenceReview.reviewer"))).not.toBeInTheDocument();
+    expect(within(detail).queryByRole("heading", { name: message("en", "context.title") })).not.toBeInTheDocument();
+
+    await user.click(within(detail).getByRole("tab", { name: "Review" }));
+    expect(within(detail).getByLabelText(message("en", "evidenceReview.reviewer"))).toBeVisible();
+    expect(within(detail).queryByText(`“${evidence.quote}”`)).not.toBeInTheDocument();
+
+    await user.click(within(detail).getByRole("tab", { name: "Source & trace" }));
+    expect(within(detail).getByRole("heading", { name: message("en", "context.title") })).toBeVisible();
+    expect(within(detail).getByText(context.highlight)).toBeVisible();
   });
 
   it("initializes from the saved locale, switches language, and persists the new choice", async () => {
@@ -308,6 +344,8 @@ describe("DiscoveryWorkbench navigation and locale integration", () => {
       evidenceSnapshot: { ...pendingEvidence, reviewStatus: "approved" },
     });
 
+    await user.click(screen.getByRole("tab", { name: "Review" }));
+
     fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.reviewer")), {
       target: { value: "Research lead" },
     });
@@ -334,6 +372,7 @@ describe("DiscoveryWorkbench navigation and locale integration", () => {
   });
 
   it("blocks synthetic acceptance and opens the locked human-authoring workflow", async () => {
+    const user = userEvent.setup();
     const syntheticEvidence = makeEvidence({
       ...evidence,
       reviewStatus: "pending",
@@ -348,6 +387,8 @@ describe("DiscoveryWorkbench navigation and locale integration", () => {
     });
 
     await renderLiveWorkbench();
+
+    await user.click(screen.getByRole("tab", { name: "Review" }));
 
     expect(screen.getByRole("button", { name: message("en", "evidenceReview.accept") })).toBeDisabled();
     expect(screen.getByText(message("en", "evidenceReview.syntheticBlocked"))).toBeVisible();
@@ -403,6 +444,8 @@ describe("DiscoveryWorkbench navigation and locale integration", () => {
       evidenceSnapshot: authoredEvidence,
     });
 
+    await user.click(screen.getByRole("tab", { name: "Review" }));
+
     fireEvent.change(screen.getByLabelText(message("en", "evidenceReview.observation")), {
       target: { value: authoredEvidence.observation },
     });
@@ -441,7 +484,8 @@ describe("DiscoveryWorkbench navigation and locale integration", () => {
       syntheticEvidence.id,
       authoredEvidence.revisionId,
     ));
-    expect(await screen.findByText(authoredEvidence.observation)).toBeVisible();
     expect(screen.getByText(message("en", "evidenceReview.humanAuthored"))).toBeVisible();
+    await user.click(screen.getByRole("tab", { name: message("en", "detail.tab.summary") }));
+    expect(await screen.findByText(authoredEvidence.observation)).toBeVisible();
   });
 });

@@ -22,6 +22,7 @@ import {
   GitBranch,
   Layers3,
   Languages,
+  LayoutDashboard,
   Link2,
   LockKeyhole,
   LoaderCircle,
@@ -54,6 +55,7 @@ import {
 import { AgentRunCenter } from "@/components/agent-run-center";
 import { ClaimsOpportunitiesView } from "@/components/claims-opportunities-view";
 import { EvaluationCenter } from "@/components/evaluation-center";
+import { OverviewCenter } from "@/components/overview-center";
 import { ProductDecisionCenter } from "@/components/product-decision-center";
 import { RetrievalLab } from "@/components/retrieval-lab";
 import { demoAgentEvents, demoContexts, demoEvidence, demoSources, demoStudies } from "@/lib/demo-data";
@@ -70,7 +72,8 @@ import {
 } from "@/lib/i18n";
 
 type ConnectionMode = "loading" | "live" | "demo";
-type WorkbenchView = "evidence" | "claims" | "runs" | "eval" | "product";
+type WorkbenchView = "overview" | "evidence" | "claims" | "runs" | "eval" | "product";
+type EvidenceDetailTab = "summary" | "review" | "source";
 type Translator = (key: MessageKey, vars?: TranslationVars) => string;
 type AgentEvent = {
   id: string;
@@ -435,7 +438,7 @@ function preferredInitialStudyId(items: Study[]): string {
 
 export function DiscoveryWorkbench() {
   const [locale, setLocale] = useState<Locale>(DEFAULT_LOCALE);
-  const [activeView, setActiveView] = useState<WorkbenchView>("evidence");
+  const [activeView, setActiveView] = useState<WorkbenchView>("overview");
   const [mode, setMode] = useState<ConnectionMode>("loading");
   const [connectionError, setConnectionError] = useState("");
   const [studies, setStudies] = useState<Study[]>([]);
@@ -447,6 +450,7 @@ export function DiscoveryWorkbench() {
   const [liveEvidence, setLiveEvidence] = useState<Evidence[]>([]);
   const [pinnedEvidenceSnapshot, setPinnedEvidenceSnapshot] = useState<Evidence | null>(null);
   const [selectedEvidenceId, setSelectedEvidenceId] = useState("");
+  const [evidenceDetailTab, setEvidenceDetailTab] = useState<EvidenceDetailTab>("summary");
   const [liveContext, setLiveContext] = useState<EvidenceContext | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [contextLoading, setContextLoading] = useState(false);
@@ -504,11 +508,12 @@ export function DiscoveryWorkbench() {
 
   useEffect(() => {
     const syncViewFromHash = () => {
-      if (window.location.hash === "#claims") setActiveView("claims");
+      if (window.location.hash === "#evidence") setActiveView("evidence");
+      else if (window.location.hash === "#claims") setActiveView("claims");
       else if (window.location.hash === "#runs") setActiveView("runs");
       else if (window.location.hash === "#eval") setActiveView("eval");
       else if (window.location.hash === "#product") setActiveView("product");
-      else setActiveView("evidence");
+      else setActiveView("overview");
     };
     syncViewFromHash();
     window.addEventListener("hashchange", syncViewFromHash);
@@ -776,6 +781,7 @@ export function DiscoveryWorkbench() {
   function selectEvidence(item: Evidence) {
     setPinnedEvidenceSnapshot(null);
     setSelectedEvidenceId(item.id);
+    setEvidenceDetailTab("summary");
     if (mode === "live") void loadContext(item);
   }
 
@@ -783,6 +789,9 @@ export function DiscoveryWorkbench() {
     setActiveView(view);
     const hash = `#${view}`;
     window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`);
+    window.requestAnimationFrame(() => {
+      document.getElementById("main-content")?.focus({ preventScroll: true });
+    });
   }
 
   function openEvidenceFromClaim(item: Evidence) {
@@ -829,6 +838,7 @@ export function DiscoveryWorkbench() {
       if (contextRequestRef.current !== requestId) return;
       setPinnedEvidenceSnapshot(snapshot);
       setSelectedEvidenceId(snapshot.id);
+      setEvidenceDetailTab("summary");
       setLiveContext(value);
       window.requestAnimationFrame(() => {
         document.querySelector<HTMLElement>(`[data-evidence-id="${CSS.escape(snapshot.id)}"]`)?.scrollIntoView({
@@ -1026,6 +1036,7 @@ export function DiscoveryWorkbench() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">{t("nav.skipToContent")}</a>
       <aside className="sidebar">
         <div className="brand-row">
           <span className="brand-mark"><Sparkles size={17} strokeWidth={2.2} /></span>
@@ -1034,6 +1045,12 @@ export function DiscoveryWorkbench() {
         </div>
 
         <nav className="primary-nav" aria-label={t("nav.aria")}>
+          <button
+            type="button"
+            className={`nav-item primary ${activeView === "overview" ? "active" : ""}`}
+            aria-current={activeView === "overview" ? "page" : undefined}
+            onClick={() => navigateView("overview")}
+          ><LayoutDashboard size={16} />{t("nav.overview")}</button>
           <button
             type="button"
             className={`nav-item primary ${activeView === "evidence" ? "active" : ""}`}
@@ -1107,11 +1124,11 @@ export function DiscoveryWorkbench() {
         </div>
       </aside>
 
-      <main className="workspace">
+      <main className="workspace" id="main-content" tabIndex={-1}>
         <header className="workspace-header">
           <div>
             <div className="breadcrumb"><FolderKanban size={14} />{t("header.studies")} <span>/</span> {selectedStudy?.title ?? t("header.noStudy")}</div>
-            <h1>{activeView === "claims" ? t("header.claims") : activeView === "runs" ? t("header.runs") : activeView === "eval" ? t("header.eval") : activeView === "product" ? t("header.product") : t("header.evidence")}</h1>
+            <h1>{activeView === "overview" ? t("header.overview") : activeView === "claims" ? t("header.claims") : activeView === "runs" ? t("header.runs") : activeView === "eval" ? t("header.eval") : activeView === "product" ? t("header.product") : t("header.evidence")}</h1>
           </div>
           <div className="connection-cluster">
             <div className="locale-switcher" role="group" aria-label={t("language.label")}>
@@ -1140,7 +1157,14 @@ export function DiscoveryWorkbench() {
           </div>
         )}
 
-        {activeView === "evidence" ? (
+        {activeView === "overview" ? (
+          <OverviewCenter
+            live={mode === "live"}
+            study={selectedStudy}
+            t={t}
+            onNavigate={navigateView}
+          />
+        ) : activeView === "evidence" ? (
         <div className="workspace-grid">
           <section className="evidence-column" id="evidence" aria-label={t("evidence.region")}>
             {selectedStudy ? (
@@ -1335,6 +1359,32 @@ export function DiscoveryWorkbench() {
                   {selectedEvidence.syntheticDemo && <span className="synthetic-badge detail-synthetic">{t("detail.synthetic")}</span>}
                 </div>
 
+                <div className="detail-tabs" role="tablist" aria-label={t("detail.tabs")}>
+                  {([
+                    ["summary", "detail.tab.summary"],
+                    ["review", "detail.tab.review"],
+                    ["source", "detail.tab.source"],
+                  ] as const).map(([tab, label]) => (
+                    <button
+                      key={tab}
+                      type="button"
+                      role="tab"
+                      aria-selected={evidenceDetailTab === tab}
+                      className={evidenceDetailTab === tab ? "active" : ""}
+                      onClick={() => setEvidenceDetailTab(tab)}
+                    >{t(label)}</button>
+                  ))}
+                </div>
+
+                {visibleContextError && (
+                  <div className="inline-error detail-context-error" role="alert">
+                    <AlertCircle size={16} />
+                    <div><strong>{t("context.failed")}</strong><span>{visibleContextError}</span></div>
+                  </div>
+                )}
+
+                {evidenceDetailTab === "summary" && (
+                  <div className="detail-tab-panel" role="tabpanel">
                 <section className="detail-section quote-section">
                   <div className="detail-label"><span>{t("detail.quote")}</span><span className="truth-label">{t("detail.sourceFact")}</span></div>
                   <blockquote>“{selectedEvidence.quote || t("detail.quoteMissing")}”</blockquote>
@@ -1369,24 +1419,34 @@ export function DiscoveryWorkbench() {
                     <div><dt>{t("detail.runStep")}</dt><dd className="mono">{selectedEvidence.runStepId || t("general.unavailable")}</dd></div>
                   </dl>
                 </section>
-
-                {mode === "live" && selectedEvidence.revisionId && (
-                  <EvidenceReviewPanel
-                    key={`${selectedEvidence.id}:${selectedEvidence.revisionId}`}
-                    evidence={selectedEvidence}
-                    live
-                    currentRevision={selectedIsCurrentEvidenceRevision}
-                    t={t}
-                    onReview={(decision, reviewer, rationale) => reviewEvidenceRevision(
-                      selectedEvidence,
-                      decision,
-                      reviewer,
-                      rationale,
-                    )}
-                    onAuthor={(input) => authorEvidenceRevision(selectedEvidence, input)}
-                  />
+                  </div>
                 )}
 
+                {evidenceDetailTab === "review" && (
+                  <div className="detail-tab-panel" role="tabpanel">
+                    {mode === "live" && selectedEvidence.revisionId ? (
+                      <EvidenceReviewPanel
+                        key={`${selectedEvidence.id}:${selectedEvidence.revisionId}`}
+                        evidence={selectedEvidence}
+                        live
+                        currentRevision={selectedIsCurrentEvidenceRevision}
+                        t={t}
+                        onReview={(decision, reviewer, rationale) => reviewEvidenceRevision(
+                          selectedEvidence,
+                          decision,
+                          reviewer,
+                          rationale,
+                        )}
+                        onAuthor={(input) => authorEvidenceRevision(selectedEvidence, input)}
+                      />
+                    ) : (
+                      <div className="detail-tab-placeholder"><ShieldCheck size={22} /><p>{t("detail.reviewPreview")}</p></div>
+                    )}
+                  </div>
+                )}
+
+                {evidenceDetailTab === "source" && (
+                  <div className="detail-tab-panel" role="tabpanel">
                 <section className="context-section">
                   <div className="section-heading">
                     <div><h2>{t("context.title")}</h2><span>{context?.locatorLabel || selectedEvidence.locatorLabel}</span></div>
@@ -1395,7 +1455,7 @@ export function DiscoveryWorkbench() {
                   {visibleContextLoading ? (
                     <div className="context-loading" role="status"><LoaderCircle className="spin" size={17} />{t("context.locating")}</div>
                   ) : visibleContextError ? (
-                    <div className="inline-error compact" role="alert"><AlertCircle size={16} /><div><strong>{t("context.failed")}</strong><span>{visibleContextError}</span></div></div>
+                    <p className="section-empty">{t("context.failed")}</p>
                   ) : context ? (
                     <>
                       <div className="source-context">
@@ -1497,6 +1557,8 @@ export function DiscoveryWorkbench() {
                     </div>
                   )}
                 </section>
+                  </div>
+                )}
               </>
             ) : (
               <div className="detail-empty"><BookOpenCheck size={25} /><h2>{t("detail.emptyTitle")}</h2><p>{t("detail.emptyBody")}</p></div>
