@@ -23,6 +23,7 @@ from discovery_lab.api.errors import (
     UnsupportedSourceError,
 )
 from discovery_lab.db.models import (
+    EvidenceReview,
     EvidenceRevision,
     EvidenceUnit,
     Run,
@@ -62,6 +63,7 @@ class EvidenceRecord:
     evidence_unit: EvidenceUnit
     revision: EvidenceRevision
     source: Source
+    latest_review: EvidenceReview | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +88,7 @@ class EvidenceContextRecord:
     source_revision: SourceRevision
     source: Source
     context_segments: tuple[Segment, ...]
+    latest_review: EvidenceReview | None
 
 
 class DiscoveryService:
@@ -760,10 +763,17 @@ class DiscoveryService:
             .limit(limit)
             .offset(offset)
         )
-        records = [
-            EvidenceRecord(evidence_unit=row[0], revision=row[1], source=row[2])
-            for row in self.session.execute(statement).all()
-        ]
+        records = []
+        for row in self.session.execute(statement).all():
+            evidence_unit, revision, source = row
+            records.append(
+                EvidenceRecord(
+                    evidence_unit=evidence_unit,
+                    revision=revision,
+                    source=source,
+                    latest_review=self._latest_evidence_review(revision.id),
+                )
+            )
         total = (
             self.session.scalar(
                 select(func.count())
@@ -819,6 +829,15 @@ class DiscoveryService:
             source_revision=source_revision,
             source=source,
             context_segments=context_segments,
+            latest_review=self._latest_evidence_review(revision.id),
+        )
+
+    def _latest_evidence_review(self, evidence_revision_id: UUID) -> EvidenceReview | None:
+        return self.session.scalar(
+            select(EvidenceReview)
+            .where(EvidenceReview.evidence_revision_id == evidence_revision_id)
+            .order_by(EvidenceReview.created_at.desc(), EvidenceReview.id.desc())
+            .limit(1)
         )
 
     def _load_run(self, run_id: UUID) -> Run:

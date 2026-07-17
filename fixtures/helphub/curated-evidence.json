@@ -1,0 +1,126 @@
+{
+  "profile": "helphub-curated-evidence.v1",
+  "description": "Human-authored evidence revisions for the bundled synthetic portfolio study. Each item is matched to an immutable CSV row and remains proposed until its seeded fixture review is recorded.",
+  "reviewer_name": "HelpHub fixture curator",
+  "review_note": "Seeded content review for the bundled synthetic portfolio fixture; this is not a live customer review.",
+  "items": [
+    {
+      "match": { "source_name": "tickets.csv", "ticket_id": "T-1001" },
+      "observation": "An enterprise security ticket was categorized as how-to, was not escalated, breached SLA, and was reopened twice.",
+      "interpretation": "Risk-sensitive routing failures can create both compliance exposure and repeat support work.",
+      "inference": "Showing the triggering text and account rules may help an agent confirm escalation earlier.",
+      "confidence": 1.0,
+      "tags": ["risk-escalation", "enterprise", "security", "sla-breach"]
+    },
+    {
+      "match": { "source_name": "tickets.csv", "ticket_id": "T-1003" },
+      "observation": "An enterprise outage ticket was not escalated, breached SLA, and was reopened once.",
+      "interpretation": "Outage signals can remain hidden when tickets are handled independently without risk-aware escalation.",
+      "inference": "Assisted high-risk detection could reduce time to human escalation for enterprise outages.",
+      "confidence": 1.0,
+      "tags": ["risk-escalation", "enterprise", "outage", "sla-breach"]
+    },
+    {
+      "match": { "source_name": "tickets.csv", "ticket_id": "T-1004" },
+      "observation": "A second enterprise outage ticket was categorized as how-to, was not escalated, breached SLA, and was reopened twice.",
+      "interpretation": "Multiple related tickets may need account-level risk context rather than isolated classification.",
+      "inference": "Grouping related high-risk signals may improve assisted escalation decisions.",
+      "confidence": 1.0,
+      "tags": ["risk-escalation", "enterprise", "outage", "repeat-contact"]
+    },
+    {
+      "match": { "source_name": "tickets.csv", "ticket_id": "T-1005" },
+      "observation": "An enterprise outage ticket was escalated but still breached SLA and was reopened once.",
+      "interpretation": "Escalation alone does not guarantee SLA recovery, so detection should not be treated as the complete solution.",
+      "inference": "A validation experiment must measure response outcomes as well as escalation recall.",
+      "confidence": 1.0,
+      "tags": ["risk-escalation", "enterprise", "counterevidence", "sla-breach"]
+    },
+    {
+      "match": { "source_name": "tickets.csv", "ticket_id": "T-1009" },
+      "observation": "An enterprise account requested auto-reply for repetitive integration questions without a reopen or SLA breach in this record.",
+      "interpretation": "Reply assistance has a real efficiency use case, but this row does not establish severe service impact.",
+      "inference": "Auto-reply value should be compared against high-risk escalation impact using separate success metrics.",
+      "confidence": 1.0,
+      "tags": ["auto-reply", "enterprise", "efficiency", "context"]
+    },
+    {
+      "match": { "source_name": "tickets.csv", "ticket_id": "T-1011" },
+      "observation": "A mid-market SSO ticket was repeatedly routed to billing and reopened once without an SLA breach in this record.",
+      "interpretation": "Classification quality is a distinct operational issue with weaker severity evidence in this sample.",
+      "inference": "Routing accuracy may merit a separate experiment if its aggregate handling cost is material.",
+      "confidence": 1.0,
+      "tags": ["classification-routing", "mid-market", "repeat-contact", "context"]
+    }
+  ],
+  "claim": {
+    "client_request_id": "helphub-risk-escalation-claim.v1",
+    "topic_key": "risk-escalation",
+    "statement": "Some enterprise high-risk tickets are missed before escalation and coincide with SLA breaches and repeat contacts.",
+    "summary": "Missed escalation appears in multiple enterprise security and outage records, while an escalated outage shows that detection alone is not sufficient.",
+    "rationale": "Three independent ticket rows show missed escalation with SLA impact; one escalated outage supplies a useful limitation, and alternative workflow requests remain visible as context.",
+    "confidence": 0.82,
+    "counterevidence_check_status": "FOUND",
+    "counterevidence_summary": "T-1005 was escalated and still breached SLA, so the proposed opportunity is limited to earlier assisted detection and must be evaluated on downstream response outcomes.",
+    "edges": [
+      {
+        "ticket_id": "T-1001",
+        "relationship": "supports",
+        "rationale": "The security ticket was not escalated, breached SLA, and was reopened twice.",
+        "relevance": 100
+      },
+      {
+        "ticket_id": "T-1003",
+        "relationship": "supports",
+        "rationale": "The outage ticket was not escalated and breached SLA.",
+        "relevance": 96
+      },
+      {
+        "ticket_id": "T-1004",
+        "relationship": "supports",
+        "rationale": "A related outage ticket was miscategorized, not escalated, and reopened twice.",
+        "relevance": 94
+      },
+      {
+        "ticket_id": "T-1005",
+        "relationship": "contradicts",
+        "rationale": "This outage was escalated yet still breached SLA, showing escalation is not sufficient by itself.",
+        "relevance": 87
+      },
+      {
+        "ticket_id": "T-1009",
+        "relationship": "contextualizes",
+        "rationale": "The record preserves demand for reply efficiency without presenting it as evidence against escalation risk.",
+        "relevance": 52
+      },
+      {
+        "ticket_id": "T-1011",
+        "relationship": "contextualizes",
+        "rationale": "The routing issue represents another candidate workflow with lower observed severity in this row.",
+        "relevance": 48
+      }
+    ],
+    "review": {
+      "decision": "ACCEPT",
+      "reviewer_name": "HelpHub fixture curator",
+      "note": "Seeded content review for the bundled portfolio fixture. Supporting and contradicting relationships were explicitly curated against exact Evidence Revisions."
+    }
+  },
+  "opportunity": {
+    "client_request_id": "helphub-assisted-escalation-opportunity.v1",
+    "title": "Evidence-backed assisted risk escalation",
+    "problem_statement": "Enterprise agents can miss high-risk signals when related tickets and account rules are reviewed in isolation.",
+    "desired_outcome": "Help agents recognize severe risk earlier while retaining human confirmation and an auditable explanation.",
+    "next_step": "Validate whether agents accept risk suggestions that cite the triggering phrases and account rules.",
+    "rationale": "The reviewed Claim establishes repeated missed escalations and a clear limitation: detection must be evaluated together with downstream response outcomes.",
+    "confidence": 0.72,
+    "assumptions": [
+      "Support agents can interpret a short explanation grounded in exact ticket text and account rules.",
+      "Earlier assisted detection can change escalation timing without removing human confirmation."
+    ],
+    "risks": [
+      "Automation bias could increase false escalations.",
+      "Earlier detection may not improve SLA outcomes if the downstream response workflow remains slow."
+    ]
+  }
+}

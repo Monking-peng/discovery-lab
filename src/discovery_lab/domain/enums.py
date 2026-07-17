@@ -22,6 +22,51 @@ class EvidenceReviewStatus(StrEnum):
     REJECTED = "REJECTED"
 
 
+class ReviewDecision(StrEnum):
+    ACCEPT = "ACCEPT"
+    REQUEST_CHANGES = "REQUEST_CHANGES"
+    REJECT = "REJECT"
+
+
+class ClaimStatus(StrEnum):
+    PROPOSED = "PROPOSED"
+    REVIEWED = "REVIEWED"
+    REJECTED = "REJECTED"
+    STALE = "STALE"
+    INVALIDATED = "INVALIDATED"
+
+
+class ClaimEvidenceRelation(StrEnum):
+    SUPPORTS = "supports"
+    CONTRADICTS = "contradicts"
+    CONTEXTUALIZES = "contextualizes"
+    INSUFFICIENT_FOR = "insufficient_for"
+
+
+class CounterevidenceStatus(StrEnum):
+    NOT_RUN = "NOT_RUN"
+    SEARCHED_NONE_FOUND = "SEARCHED_NONE_FOUND"
+    FOUND = "FOUND"
+
+
+class OpportunityStatus(StrEnum):
+    """Lifecycle exposed by the first Opportunity vertical slice.
+
+    A Draft is deliberately not a publication state. Later review/publish states
+    require their own explicit workflow rather than overloading this enum.
+    """
+
+    DRAFT = "DRAFT"
+
+
+class RetrievalPurpose(StrEnum):
+    """Declared intent for an immutable evidence retrieval manifest."""
+
+    SUPPORT = "support"
+    COUNTEREVIDENCE = "counterevidence"
+    EXPLORE = "explore"
+
+
 class RunStatus(StrEnum):
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
@@ -40,3 +85,16 @@ class RunStepStatus(StrEnum):
     FAILED = "FAILED"
     SKIPPED = "SKIPPED"
     CANCELLED = "CANCELLED"
+
+
+class ToolCallStatus(StrEnum):
+    RUNNING = "RUNNING"
+    APPROVAL_REQUIRED = "APPROVAL_REQUIRED"
+    SUCCEEDED = "SUCCEEDED"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+
+
+class ToolApprovalDecision(StrEnum):
+    APPROVE = "APPROVE"
+    REJECT = "REJECT"

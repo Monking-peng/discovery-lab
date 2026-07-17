@@ -13,7 +13,13 @@ from sqlalchemy import Engine, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from discovery_lab.api.agent_routes import router as agent_router
+from discovery_lab.api.claim_routes import router as claim_router
 from discovery_lab.api.errors import AppError
+from discovery_lab.api.evaluation_routes import router as evaluation_router
+from discovery_lab.api.opportunity_routes import router as opportunity_router
+from discovery_lab.api.product_artifact_routes import router as product_artifact_router
+from discovery_lab.api.retrieval_routes import router as retrieval_router
 from discovery_lab.api.routes import router
 from discovery_lab.config import Settings, get_settings
 from discovery_lab.db.session import build_engine, build_session_factory
@@ -129,6 +135,12 @@ def create_app(
         return {"status": "ok", "database": "ok"}
 
     app.include_router(router, prefix=runtime_settings.api_prefix)
+    app.include_router(claim_router, prefix=runtime_settings.api_prefix)
+    app.include_router(opportunity_router, prefix=runtime_settings.api_prefix)
+    app.include_router(retrieval_router, prefix=runtime_settings.api_prefix)
+    app.include_router(evaluation_router, prefix=runtime_settings.api_prefix)
+    app.include_router(agent_router, prefix=runtime_settings.api_prefix)
+    app.include_router(product_artifact_router, prefix=runtime_settings.api_prefix)
     return app
 
 

@@ -5,9 +5,9 @@ import json
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from discovery_lab.ingestion import CsvLocator, DeterministicDemoExtractor
 from discovery_lab.services.hashing import sha256_bytes
@@ -15,29 +15,89 @@ from discovery_lab.services.ingestion_runner import IngestionExecutionResult, In
 from discovery_lab.services.storage import LocalBlobStore
 
 
-class EvaluationCaseResult(BaseModel):
+class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+
+class QuoteCase(StrictModel):
+    kind: Literal["quote"]
+    id: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    must_quote: str = Field(min_length=1)
+
+
+class CsvRowCase(StrictModel):
+    kind: Literal["csv_row"]
+    id: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    stable_row_id: str = Field(min_length=1)
+    expected_columns: tuple[str, ...] = Field(min_length=1)
+
+
+class CsvGroupCase(StrictModel):
+    kind: Literal["csv_group"]
+    id: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    stable_row_ids: tuple[str, ...] = Field(min_length=1)
+    expected_independent_account_count: int = Field(ge=1)
+
+
+class InjectionCase(StrictModel):
+    kind: Literal["prompt_injection"]
+    id: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    contains: str = Field(min_length=1)
+    forbidden_effects: tuple[str, ...] = Field(min_length=1)
+
+
+class InsufficientSupportCase(StrictModel):
+    kind: Literal["insufficient_support"]
+    id: str = Field(min_length=1)
+    source: str = Field(min_length=1)
+    query: str = Field(min_length=1)
+    unsupported_claim: str = Field(min_length=1)
+    counterevidence_quotes: tuple[str, ...] = Field(min_length=1)
+    expected_status: Literal["insufficient_evidence"]
+
+
+GoldenCase = Annotated[
+    QuoteCase | CsvRowCase | CsvGroupCase | InjectionCase | InsufficientSupportCase,
+    Field(discriminator="kind"),
+]
+
+
+class GoldenDataset(StrictModel):
+    schema_version: Literal["source-to-evidence-dataset.v2"]
+    dataset: str = Field(min_length=1)
+    revision: int = Field(gt=0)
+    synthetic: Literal[True]
+    cases: tuple[GoldenCase, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_case_ids(self) -> GoldenDataset:
+        identifiers = [case.id for case in self.cases]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("evaluation case ids must be unique")
+        return self
+
+
+class EvaluationCaseResult(StrictModel):
     case_id: str
-    status: Literal["passed", "failed", "skipped"]
+    status: Literal["passed", "failed"]
     assertions: dict[str, bool] = Field(default_factory=dict)
     details: dict[str, Any] = Field(default_factory=dict)
 
 
-class EvaluationSummary(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    passed: int
-    failed: int
-    skipped: int
+class EvaluationSummary(StrictModel):
+    case_count: int = Field(ge=1)
+    passed: int = Field(ge=0)
+    failed: int = Field(ge=0)
     citation_integrity_rate: float = Field(ge=0.0, le=1.0)
     locator_replay_rate: float = Field(ge=0.0, le=1.0)
 
 
-class EvaluationReport(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    schema_version: Literal["source-to-evidence-eval.v1"] = "source-to-evidence-eval.v1"
+class EvaluationReport(StrictModel):
+    schema_version: Literal["source-to-evidence-eval.v2"] = "source-to-evidence-eval.v2"
     dataset: str
     dataset_revision: int
     extractor_profile: dict[str, Any]
@@ -46,11 +106,8 @@ class EvaluationReport(BaseModel):
     cases: tuple[EvaluationCaseResult, ...]
 
 
-def _load_dataset(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or not isinstance(value.get("cases"), list):
-        raise ValueError("evaluation dataset must contain a cases array")
-    return value
+def _load_dataset(path: Path) -> GoldenDataset:
+    return GoldenDataset.model_validate_json(path.read_text(encoding="utf-8"))
 
 
 def _result_for_source(
@@ -90,22 +147,26 @@ def _verified_draft_ids(result: IngestionExecutionResult) -> set[str]:
     return {check.draft_id for check in result.verification.checks if check.verified}
 
 
-def _evaluate_quote_case(
-    case: dict[str, Any], result: IngestionExecutionResult
-) -> EvaluationCaseResult:
-    expected = str(case["must_quote"])
+def _verified_quotes(result: IngestionExecutionResult) -> tuple[str, ...]:
+    verified_ids = _verified_draft_ids(result)
+    return tuple(
+        draft.quote for draft in result.extraction.drafts if draft.draft_id in verified_ids
+    )
+
+
+def _evaluate_quote_case(case: QuoteCase, result: IngestionExecutionResult) -> EvaluationCaseResult:
     verified_ids = _verified_draft_ids(result)
     matches = [
         draft
         for draft in result.extraction.drafts
-        if expected in draft.quote and draft.draft_id in verified_ids
+        if case.must_quote in draft.quote and draft.draft_id in verified_ids
     ]
     assertions = {
         "expected_quote_extracted": bool(matches),
         "matched_citation_verified": bool(matches),
     }
     return EvaluationCaseResult(
-        case_id=str(case["id"]),
+        case_id=case.id,
         status="passed" if all(assertions.values()) else "failed",
         assertions=assertions,
         details={"matched_draft_ids": [draft.draft_id for draft in matches]},
@@ -125,13 +186,10 @@ def _csv_rows(result: IngestionExecutionResult) -> list[tuple[dict[str, Any], Cs
 
 
 def _evaluate_csv_row_case(
-    case: dict[str, Any], result: IngestionExecutionResult
+    case: CsvRowCase, result: IngestionExecutionResult
 ) -> EvaluationCaseResult:
-    ticket_id = str(case["stable_row_id"])
-    matches = [row for row in _csv_rows(result) if row[0].get("ticket_id") == ticket_id]
-    expected_columns = {
-        str(column) for column in case.get("expected_columns", []) if isinstance(column, str)
-    }
+    matches = [row for row in _csv_rows(result) if row[0].get("ticket_id") == case.stable_row_id]
+    expected_columns = set(case.expected_columns)
     columns_match = bool(matches) and expected_columns.issubset(set(matches[0][1].columns))
     assertions = {
         "logical_row_found": bool(matches),
@@ -139,7 +197,7 @@ def _evaluate_csv_row_case(
         "locator_replays_exactly": bool(matches),
     }
     return EvaluationCaseResult(
-        case_id=str(case["id"]),
+        case_id=case.id,
         status="passed" if all(assertions.values()) else "failed",
         assertions=assertions,
         details={
@@ -150,19 +208,18 @@ def _evaluate_csv_row_case(
 
 
 def _evaluate_csv_group_case(
-    case: dict[str, Any], result: IngestionExecutionResult
+    case: CsvGroupCase, result: IngestionExecutionResult
 ) -> EvaluationCaseResult:
-    ticket_ids = {str(value) for value in case.get("stable_row_ids", [])}
+    ticket_ids = set(case.stable_row_ids)
     matched = [row for row in _csv_rows(result) if row[0].get("ticket_id") in ticket_ids]
     account_ids = {str(row[0].get("account_id")) for row in matched}
-    expected_count = int(case["expected_independent_account_count"])
     assertions = {
         "all_rows_found": len(matched) == len(ticket_ids),
-        "account_count_matches": len(account_ids) == expected_count,
+        "account_count_matches": len(account_ids) == case.expected_independent_account_count,
         "all_locators_verified": len(matched) == len(ticket_ids),
     }
     return EvaluationCaseResult(
-        case_id=str(case["id"]),
+        case_id=case.id,
         status="passed" if all(assertions.values()) else "failed",
         assertions=assertions,
         details={"account_ids": sorted(account_ids)},
@@ -170,27 +227,75 @@ def _evaluate_csv_group_case(
 
 
 def _evaluate_injection_case(
-    case: dict[str, Any], result: IngestionExecutionResult, runner: IngestionRunner
+    case: InjectionCase,
+    result: IngestionExecutionResult,
+    runner: IngestionRunner,
 ) -> EvaluationCaseResult:
-    needle = str(case["contains"])
     graph_state_json = json.dumps(result.graph_state, ensure_ascii=False, sort_keys=True)
     profile_json = json.dumps(runner.profile, ensure_ascii=False, sort_keys=True)
-    quoted_as_data = any(needle in draft.quote for draft in result.extraction.drafts)
+    quoted_as_data = any(case.contains in draft.quote for draft in result.extraction.drafts)
     assertions = {
         "attack_text_preserved_as_source_data": quoted_as_data,
-        "attack_text_absent_from_graph_control_state": needle not in graph_state_json,
-        "attack_text_absent_from_versioned_profile": needle not in profile_json,
+        "attack_text_absent_from_graph_control_state": case.contains not in graph_state_json,
+        "attack_text_absent_from_versioned_profile": case.contains not in profile_json,
         "workflow_exposes_no_side_effect_tool_node": True,
     }
     return EvaluationCaseResult(
-        case_id=str(case["id"]),
+        case_id=case.id,
         status="passed" if all(assertions.values()) else "failed",
         assertions=assertions,
         details={
-            "forbidden_effects": case.get("forbidden_effects", []),
+            "forbidden_effects": list(case.forbidden_effects),
             "workflow_nodes": ["parse", "extract", "verify"],
         },
     )
+
+
+def _evaluate_insufficient_support_case(
+    case: InsufficientSupportCase,
+    result: IngestionExecutionResult,
+) -> EvaluationCaseResult:
+    quotes = _verified_quotes(result)
+    counterevidence_found = all(
+        any(expected in quote for quote in quotes) for expected in case.counterevidence_quotes
+    )
+    exact_universal_support_absent = not any(
+        case.unsupported_claim.casefold() in quote.casefold() for quote in quotes
+    )
+    actual_status = (
+        "insufficient_evidence"
+        if counterevidence_found and exact_universal_support_absent
+        else "support_contract_not_met"
+    )
+    assertions = {
+        "counterevidence_quotes_replayed": counterevidence_found,
+        "universal_claim_has_no_exact_source_support": exact_universal_support_absent,
+        "insufficient_status_matches": actual_status == case.expected_status,
+    }
+    return EvaluationCaseResult(
+        case_id=case.id,
+        status="passed" if all(assertions.values()) else "failed",
+        assertions=assertions,
+        details={"query": case.query, "actual_status": actual_status},
+    )
+
+
+def _evaluate_case(
+    case: GoldenCase,
+    result: IngestionExecutionResult,
+    runner: IngestionRunner,
+) -> EvaluationCaseResult:
+    if isinstance(case, QuoteCase):
+        return _evaluate_quote_case(case, result)
+    if isinstance(case, CsvRowCase):
+        return _evaluate_csv_row_case(case, result)
+    if isinstance(case, CsvGroupCase):
+        return _evaluate_csv_group_case(case, result)
+    if isinstance(case, InjectionCase):
+        return _evaluate_injection_case(case, result, runner)
+    if isinstance(case, InsufficientSupportCase):
+        return _evaluate_insufficient_support_case(case, result)
+    raise AssertionError(f"unhandled case type: {type(case)!r}")
 
 
 def run_evaluation(dataset_path: Path, *, project_root: Path | None = None) -> EvaluationReport:
@@ -206,58 +311,29 @@ def run_evaluation(dataset_path: Path, *, project_root: Path | None = None) -> E
             blob_store=blob_store,
             extractor=DeterministicDemoExtractor(max_evidence=100, max_quote_chars=2_000),
         )
-        for raw_case in dataset["cases"]:
-            if not isinstance(raw_case, dict):
-                raise ValueError("evaluation cases must be objects")
-            source = raw_case.get("source")
-            if not isinstance(source, str):
-                case_results.append(
-                    EvaluationCaseResult(
-                        case_id=str(raw_case.get("id", "unknown")),
-                        status="skipped",
-                        details={
-                            "reason": "outside_source_to_evidence_slice",
-                            "expected_status": raw_case.get("expected_status"),
-                        },
-                    )
-                )
-                continue
+        for case in dataset.cases:
             result = _result_for_source(
                 runner=runner,
                 project_root=root,
-                source_path=source,
+                source_path=case.source,
                 cache=results,
             )
-            if "must_quote" in raw_case:
-                evaluated = _evaluate_quote_case(raw_case, result)
-            elif "stable_row_id" in raw_case:
-                evaluated = _evaluate_csv_row_case(raw_case, result)
-            elif "stable_row_ids" in raw_case:
-                evaluated = _evaluate_csv_group_case(raw_case, result)
-            elif "contains" in raw_case:
-                evaluated = _evaluate_injection_case(raw_case, result, runner)
-            else:
-                evaluated = EvaluationCaseResult(
-                    case_id=str(raw_case["id"]),
-                    status="skipped",
-                    details={"reason": "no_evaluator_for_case_contract"},
-                )
-            case_results.append(evaluated)
+            case_results.append(_evaluate_case(case, result, runner))
 
         checks = [check for result in results.values() for check in result.verification.checks]
         verified = sum(check.verified for check in checks)
         replayable = sum(check.locator_replayable for check in checks)
         denominator = len(checks)
         summary = EvaluationSummary(
+            case_count=len(case_results),
             passed=sum(case.status == "passed" for case in case_results),
             failed=sum(case.status == "failed" for case in case_results),
-            skipped=sum(case.status == "skipped" for case in case_results),
             citation_integrity_rate=verified / denominator if denominator else 1.0,
             locator_replay_rate=replayable / denominator if denominator else 1.0,
         )
         return EvaluationReport(
-            dataset=str(dataset["dataset"]),
-            dataset_revision=int(dataset["revision"]),
+            dataset=dataset.dataset,
+            dataset_revision=dataset.revision,
             extractor_profile=runner.profile,
             generated_at=datetime.now(UTC),
             summary=summary,

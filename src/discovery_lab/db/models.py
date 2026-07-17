@@ -4,10 +4,13 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
+    Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -24,11 +27,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from discovery_lab.db.base import Base, CreatedAtMixin, UUIDPrimaryKeyMixin
 from discovery_lab.domain.enums import (
+    ClaimStatus,
+    CounterevidenceStatus,
     EvidenceReviewStatus,
+    OpportunityStatus,
     RunStatus,
     RunStepStatus,
     SourceStatus,
     StudyStatus,
+    ToolCallStatus,
 )
 
 JSON_DOCUMENT = JSON().with_variant(JSONB(), "postgresql")
@@ -49,6 +56,13 @@ class Study(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         back_populates="study", cascade="all, delete-orphan"
     )
     runs: Mapped[list[Run]] = relationship(back_populates="study", cascade="all, delete-orphan")
+    claims: Mapped[list[Claim]] = relationship(back_populates="study", cascade="all, delete-orphan")
+    opportunity_drafts: Mapped[list[OpportunityDraft]] = relationship(
+        back_populates="study", cascade="all, delete-orphan"
+    )
+    context_manifests: Mapped[list[ContextManifest]] = relationship(
+        back_populates="study", cascade="all, delete-orphan"
+    )
 
 
 class Source(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
@@ -157,6 +171,9 @@ class EvidenceRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     evidence_unit_id: Mapped[UUID] = mapped_column(
         ForeignKey("evidence_units.id", ondelete="CASCADE"), nullable=False
     )
+    parent_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("evidence_revisions.id", ondelete="RESTRICT")
+    )
     source_revision_id: Mapped[UUID] = mapped_column(
         ForeignKey("source_revisions.id", ondelete="RESTRICT"), nullable=False
     )
@@ -178,11 +195,23 @@ class EvidenceRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     locator: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     provenance: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, default=dict, nullable=False)
+    client_request_id: Mapped[str | None] = mapped_column(String(200), unique=True)
+    request_hash: Mapped[str | None] = mapped_column(String(64))
 
     evidence_unit: Mapped[EvidenceUnit] = relationship(back_populates="revisions")
+    parent_revision: Mapped[EvidenceRevision | None] = relationship(
+        remote_side="EvidenceRevision.id",
+        foreign_keys=[parent_revision_id],
+    )
     source_revision: Mapped[SourceRevision] = relationship()
     segment: Mapped[Segment] = relationship(back_populates="evidence_revisions")
     run_step: Mapped[RunStep | None] = relationship(back_populates="evidence_revisions")
+    reviews: Mapped[list[EvidenceReview]] = relationship(
+        back_populates="evidence_revision",
+        cascade="all, delete-orphan",
+        order_by="EvidenceReview.created_at",
+    )
+    claim_edges: Mapped[list[ClaimEvidenceEdge]] = relationship(back_populates="evidence_revision")
 
     __table_args__ = (
         UniqueConstraint(
@@ -190,6 +219,10 @@ class EvidenceRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
         ),
         CheckConstraint("revision > 0", name="positive_revision"),
         CheckConstraint("length(content_hash) = 64", name="sha256_length"),
+        CheckConstraint(
+            "request_hash IS NULL OR length(request_hash) = 64",
+            name="request_hash_sha256_length",
+        ),
         Index("ix_evidence_revisions_source_revision", "source_revision_id"),
     )
 
@@ -212,15 +245,24 @@ class Run(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     error: Mapped[dict[str, Any] | None] = mapped_column(JSON_DOCUMENT)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    client_request_id: Mapped[str | None] = mapped_column(String(200), unique=True)
+    request_hash: Mapped[str | None] = mapped_column(String(64))
 
     study: Mapped[Study] = relationship(back_populates="runs")
     source: Mapped[Source | None] = relationship(back_populates="runs")
     steps: Mapped[list[RunStep]] = relationship(
         back_populates="run", cascade="all, delete-orphan", order_by="RunStep.ordinal"
     )
+    tool_calls: Mapped[list[ToolCall]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="ToolCall.created_at"
+    )
 
     __table_args__ = (
         CheckConstraint("length(input_hash) = 64", name="sha256_length"),
+        CheckConstraint(
+            "request_hash IS NULL OR length(request_hash) = 64",
+            name="request_hash_sha256_length",
+        ),
         Index("ix_runs_study_created", "study_id", "created_at"),
         Index("ix_runs_source_input_hash", "source_id", "input_hash"),
         Index(
@@ -254,6 +296,7 @@ class RunStep(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
 
     run: Mapped[Run] = relationship(back_populates="steps")
     evidence_revisions: Mapped[list[EvidenceRevision]] = relationship(back_populates="run_step")
+    tool_calls: Mapped[list[ToolCall]] = relationship(back_populates="run_step")
 
     __table_args__ = (
         UniqueConstraint("run_id", "ordinal", name="uq_run_steps_run_ordinal"),
@@ -263,7 +306,593 @@ class RunStep(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
     )
 
 
-IMMUTABLE_MODELS = (SourceRevision, Segment, EvidenceRevision)
+class ToolCall(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Persisted tool invocation with immutable name, arguments, and policy contract."""
+
+    __tablename__ = "tool_calls"
+
+    run_id: Mapped[UUID] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), nullable=False)
+    run_step_id: Mapped[UUID] = mapped_column(
+        ForeignKey("run_steps.id", ondelete="CASCADE"), nullable=False
+    )
+    tool_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    tool_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    access_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    risk_level: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), default=ToolCallStatus.RUNNING.value, nullable=False
+    )
+    arguments: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    arguments_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    result: Mapped[dict[str, Any] | None] = mapped_column(JSON_DOCUMENT)
+    result_hash: Mapped[str | None] = mapped_column(String(64))
+    policy_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    requires_approval: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    run: Mapped[Run] = relationship(back_populates="tool_calls")
+    run_step: Mapped[RunStep] = relationship(back_populates="tool_calls")
+    approval: Mapped[ToolApproval | None] = relationship(
+        back_populates="tool_call", cascade="all, delete-orphan", uselist=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("access_mode IN ('read', 'write')", name="valid_access_mode"),
+        CheckConstraint("risk_level IN ('low', 'medium', 'high')", name="valid_risk_level"),
+        CheckConstraint(
+            "status IN ('RUNNING', 'APPROVAL_REQUIRED', 'SUCCEEDED', 'REJECTED', 'FAILED')",
+            name="valid_status",
+        ),
+        CheckConstraint("length(arguments_hash) = 64", name="arguments_hash_sha256_length"),
+        CheckConstraint(
+            "result_hash IS NULL OR length(result_hash) = 64",
+            name="result_hash_sha256_length",
+        ),
+        Index("ix_tool_calls_run_created", "run_id", "created_at"),
+        Index("ix_tool_calls_step", "run_step_id"),
+    )
+
+
+class ToolApproval(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Append-only human decision bound to the exact Tool Call argument hash."""
+
+    __tablename__ = "tool_approvals"
+
+    tool_call_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    arguments_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    reviewer: Mapped[str] = mapped_column(String(200), nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    client_request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    tool_call: Mapped[ToolCall] = relationship(back_populates="approval")
+
+    __table_args__ = (
+        CheckConstraint("decision IN ('APPROVE', 'REJECT')", name="valid_decision"),
+        CheckConstraint("length(arguments_hash) = 64", name="arguments_hash_sha256_length"),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_sha256_length"),
+        Index("ix_tool_approvals_tool_call", "tool_call_id", "created_at"),
+    )
+
+
+class Hypothesis(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable falsifiable statement pinned to an Agent Run and exact context."""
+
+    __tablename__ = "hypotheses"
+
+    study_id: Mapped[UUID] = mapped_column(
+        ForeignKey("studies.id", ondelete="CASCADE"), nullable=False
+    )
+    run_id: Mapped[UUID] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    claim_id: Mapped[UUID] = mapped_column(
+        ForeignKey("claims.id", ondelete="RESTRICT"), nullable=False
+    )
+    claim_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("claim_revisions.id", ondelete="RESTRICT"), nullable=False
+    )
+    context_manifest_id: Mapped[UUID] = mapped_column(
+        ForeignKey("context_manifests.id", ondelete="RESTRICT"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(String(32), default="DRAFT", nullable=False)
+    statement: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    falsification_criterion: Mapped[str] = mapped_column(Text, nullable=False)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("status = 'DRAFT'", name="valid_status"),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256_length"),
+        Index("ix_hypotheses_study_created", "study_id", "created_at"),
+    )
+
+
+class Experiment(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable experiment draft produced by one approved write Tool Call."""
+
+    __tablename__ = "experiments"
+
+    study_id: Mapped[UUID] = mapped_column(
+        ForeignKey("studies.id", ondelete="CASCADE"), nullable=False
+    )
+    hypothesis_id: Mapped[UUID] = mapped_column(
+        ForeignKey("hypotheses.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    tool_call_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tool_calls.id", ondelete="RESTRICT"), nullable=False, unique=True
+    )
+    status: Mapped[str] = mapped_column(String(32), default="DRAFT", nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_cohort: Mapped[str] = mapped_column(Text, nullable=False)
+    primary_metric: Mapped[str] = mapped_column(Text, nullable=False)
+    success_threshold: Mapped[str] = mapped_column(Text, nullable=False)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("status = 'DRAFT'", name="valid_status"),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256_length"),
+        Index("ix_experiments_study_created", "study_id", "created_at"),
+    )
+
+
+class ProductDecision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Append-only human decision for one exact Experiment draft."""
+
+    __tablename__ = "product_decisions"
+
+    study_id: Mapped[UUID] = mapped_column(
+        ForeignKey("studies.id", ondelete="CASCADE"), nullable=False
+    )
+    experiment_id: Mapped[UUID] = mapped_column(
+        ForeignKey("experiments.id", ondelete="RESTRICT"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    observed_result: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    decided_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('PROCEED', 'ITERATE', 'STOP')",
+            name="valid_decision",
+        ),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256_length"),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_sha256_length"),
+        Index("ix_product_decisions_experiment_created", "experiment_id", "created_at"),
+        Index("ix_product_decisions_study_created", "study_id", "created_at"),
+    )
+
+
+class PrdArtifact(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable PRD draft with frozen exact-revision citation snapshots."""
+
+    __tablename__ = "prd_artifacts"
+
+    study_id: Mapped[UUID] = mapped_column(
+        ForeignKey("studies.id", ondelete="CASCADE"), nullable=False
+    )
+    decision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("product_decisions.id", ondelete="RESTRICT"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(240), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="DRAFT", nullable=False)
+    sections: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    citations: Mapped[list[dict[str, Any]]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    publication_blockers: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("status = 'DRAFT'", name="valid_status"),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256_length"),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_sha256_length"),
+        Index("ix_prd_artifacts_decision_created", "decision_id", "created_at"),
+        Index("ix_prd_artifacts_study_created", "study_id", "created_at"),
+    )
+
+
+class EvidenceReview(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Append-only human decision for one exact immutable evidence revision."""
+
+    __tablename__ = "evidence_reviews"
+
+    evidence_unit_id: Mapped[UUID] = mapped_column(
+        ForeignKey("evidence_units.id", ondelete="CASCADE"), nullable=False
+    )
+    evidence_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("evidence_revisions.id", ondelete="CASCADE"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    reviewer: Mapped[str] = mapped_column(String(200), nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text)
+    client_request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    evidence_revision: Mapped[EvidenceRevision] = relationship(back_populates="reviews")
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('ACCEPT', 'REQUEST_CHANGES', 'REJECT')",
+            name="valid_decision",
+        ),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_sha256_length"),
+        Index("ix_evidence_reviews_revision_created", "evidence_revision_id", "created_at"),
+    )
+
+
+class Claim(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Stable claim identity; all authored content lives in immutable revisions."""
+
+    __tablename__ = "claims"
+
+    study_id: Mapped[UUID] = mapped_column(
+        ForeignKey("studies.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), default=ClaimStatus.PROPOSED.value, nullable=False
+    )
+
+    study: Mapped[Study] = relationship(back_populates="claims")
+    revisions: Mapped[list[ClaimRevision]] = relationship(
+        back_populates="claim",
+        cascade="all, delete-orphan",
+        order_by="ClaimRevision.revision",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PROPOSED', 'REVIEWED', 'REJECTED', 'STALE', 'INVALIDATED')",
+            name="valid_status",
+        ),
+        Index("ix_claims_study_created", "study_id", "created_at"),
+    )
+
+
+class ClaimRevision(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable statement and frozen Evidence Revision edge set."""
+
+    __tablename__ = "claim_revisions"
+
+    claim_id: Mapped[UUID] = mapped_column(
+        ForeignKey("claims.id", ondelete="CASCADE"), nullable=False
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_revision_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("claim_revisions.id", ondelete="RESTRICT")
+    )
+    statement: Mapped[str] = mapped_column(Text, nullable=False)
+    topic_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    counterevidence_status: Mapped[str] = mapped_column(
+        String(32), default=CounterevidenceStatus.NOT_RUN.value, nullable=False
+    )
+    counterevidence_summary: Mapped[str | None] = mapped_column(Text)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, default=dict, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    claim: Mapped[Claim] = relationship(back_populates="revisions", foreign_keys=[claim_id])
+    base_revision: Mapped[ClaimRevision | None] = relationship(
+        remote_side="ClaimRevision.id", foreign_keys=[base_revision_id]
+    )
+    evidence_edges: Mapped[list[ClaimEvidenceEdge]] = relationship(
+        back_populates="claim_revision",
+        cascade="all, delete-orphan",
+        order_by="ClaimEvidenceEdge.created_at",
+    )
+    reviews: Mapped[list[ClaimReview]] = relationship(
+        back_populates="claim_revision",
+        cascade="all, delete-orphan",
+        order_by="ClaimReview.created_at",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("claim_id", "revision", name="uq_claim_revisions_claim_revision"),
+        CheckConstraint("revision > 0", name="positive_revision"),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        CheckConstraint(
+            "counterevidence_status IN ('NOT_RUN', 'SEARCHED_NONE_FOUND', 'FOUND')",
+            name="valid_counterevidence_status",
+        ),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256_length"),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_sha256_length"),
+        Index("ix_claim_revisions_claim_created", "claim_id", "created_at"),
+    )
+
+
+class ClaimEvidenceEdge(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable relation from one Claim Revision to one Evidence Revision."""
+
+    __tablename__ = "claim_evidence_edges"
+
+    claim_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("claim_revisions.id", ondelete="CASCADE"), nullable=False
+    )
+    evidence_unit_id: Mapped[UUID] = mapped_column(
+        ForeignKey("evidence_units.id", ondelete="RESTRICT"), nullable=False
+    )
+    evidence_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("evidence_revisions.id", ondelete="RESTRICT"), nullable=False
+    )
+    relation: Mapped[str] = mapped_column(String(32), nullable=False)
+    relation_confirmed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    rationale: Mapped[str] = mapped_column(Text, nullable=False)
+    relevance: Mapped[float] = mapped_column(Float, nullable=False)
+
+    claim_revision: Mapped[ClaimRevision] = relationship(back_populates="evidence_edges")
+    evidence_revision: Mapped[EvidenceRevision] = relationship(back_populates="claim_edges")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "claim_revision_id",
+            "evidence_revision_id",
+            name="uq_claim_evidence_edges_claim_evidence_revision",
+        ),
+        CheckConstraint(
+            "relation IN ('supports', 'contradicts', 'contextualizes', 'insufficient_for')",
+            name="valid_relation",
+        ),
+        CheckConstraint("relevance >= 0 AND relevance <= 1", name="relevance_range"),
+        Index("ix_claim_evidence_edges_evidence_revision", "evidence_revision_id"),
+    )
+
+
+class ClaimReview(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Append-only human decision bound to one exact Claim Revision."""
+
+    __tablename__ = "claim_reviews"
+
+    claim_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("claim_revisions.id", ondelete="CASCADE"), nullable=False
+    )
+    decision: Mapped[str] = mapped_column(String(32), nullable=False)
+    reviewer: Mapped[str] = mapped_column(String(200), nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text)
+    evidence_review_snapshot: Mapped[dict[str, str]] = mapped_column(
+        JSON_DOCUMENT, default=dict, nullable=False
+    )
+    client_request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    claim_revision: Mapped[ClaimRevision] = relationship(back_populates="reviews")
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('ACCEPT', 'REQUEST_CHANGES', 'REJECT')",
+            name="valid_decision",
+        ),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_sha256_length"),
+        Index("ix_claim_reviews_revision_created", "claim_revision_id", "created_at"),
+    )
+
+
+class OpportunityDraft(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable Opportunity proposal pinned to one exact Claim Revision.
+
+    The first vertical slice intentionally has no publish transition. A draft can
+    be evaluated and replayed, but cannot be represented as a published decision.
+    """
+
+    __tablename__ = "opportunity_drafts"
+
+    study_id: Mapped[UUID] = mapped_column(
+        ForeignKey("studies.id", ondelete="CASCADE"), nullable=False
+    )
+    claim_id: Mapped[UUID] = mapped_column(
+        ForeignKey("claims.id", ondelete="CASCADE"), nullable=False
+    )
+    claim_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey("claim_revisions.id", ondelete="CASCADE"), nullable=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), default=OpportunityStatus.DRAFT.value, nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    problem_statement: Mapped[str] = mapped_column(Text, nullable=False)
+    desired_outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    next_step: Mapped[str] = mapped_column(Text, nullable=False)
+    rationale: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    assumptions: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, default=list, nullable=False)
+    risks: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, default=list, nullable=False)
+    provenance: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, default=dict, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    study: Mapped[Study] = relationship(back_populates="opportunity_drafts")
+    claim: Mapped[Claim] = relationship()
+    claim_revision: Mapped[ClaimRevision] = relationship()
+
+    __table_args__ = (
+        CheckConstraint("status = 'DRAFT'", name="valid_status"),
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="confidence_range"),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256_length"),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_sha256_length"),
+        Index("ix_opportunity_drafts_study_created", "study_id", "created_at"),
+        Index("ix_opportunity_drafts_claim_revision", "claim_revision_id"),
+    )
+
+
+class EvidenceSearchProjection(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Rebuildable retrieval projection; never an evidence source of truth."""
+
+    __tablename__ = "evidence_search_projections"
+
+    study_id: Mapped[UUID] = mapped_column(
+        ForeignKey("studies.id", ondelete="CASCADE", name="fk_search_projection_study"),
+        nullable=False,
+    )
+    evidence_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "evidence_revisions.id",
+            ondelete="CASCADE",
+            name="fk_search_projection_evidence_revision",
+        ),
+        nullable=False,
+        unique=True,
+    )
+    projection_text: Mapped[str] = mapped_column(Text, nullable=False)
+    lexical_terms: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(
+        Vector(256).with_variant(JSON(), "sqlite"), nullable=False
+    )
+    algorithm_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    algorithm_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    evidence_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=sql_text("CURRENT_TIMESTAMP"), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint("length(evidence_content_hash) = 64", name="content_hash_sha256"),
+        Index("ix_evidence_search_projections_study", "study_id"),
+    )
+
+
+class ContextManifest(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Immutable record of a retrieval request and its exact ranked result set."""
+
+    __tablename__ = "context_manifests"
+
+    study_id: Mapped[UUID] = mapped_column(
+        ForeignKey("studies.id", ondelete="CASCADE"), nullable=False
+    )
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    result_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    profile_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    profile_version: Mapped[str] = mapped_column(String(50), nullable=False)
+    lexical_algorithm: Mapped[str] = mapped_column(String(100), nullable=False)
+    vector_algorithm: Mapped[str] = mapped_column(String(100), nullable=False)
+    fusion_algorithm: Mapped[str] = mapped_column(String(100), nullable=False)
+    query_handling: Mapped[str] = mapped_column(String(50), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    client_request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    study: Mapped[Study] = relationship(back_populates="context_manifests")
+    items: Mapped[list[ContextManifestItem]] = relationship(
+        back_populates="context_manifest",
+        cascade="all, delete-orphan",
+        order_by="ContextManifestItem.ordinal",
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('support', 'counterevidence', 'explore')", name="valid_purpose"
+        ),
+        CheckConstraint("result_limit > 0 AND result_limit <= 50", name="valid_result_limit"),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256_length"),
+        CheckConstraint("length(request_hash) = 64", name="request_hash_sha256_length"),
+        Index("ix_context_manifests_study_created", "study_id", "created_at"),
+    )
+
+
+class ContextManifestItem(UUIDPrimaryKeyMixin, CreatedAtMixin, Base):
+    """Frozen exact Evidence/Source/Review revision and scores returned by retrieval."""
+
+    __tablename__ = "context_manifest_items"
+
+    context_manifest_id: Mapped[UUID] = mapped_column(
+        ForeignKey("context_manifests.id", ondelete="CASCADE", name="fk_manifest_items_manifest"),
+        nullable=False,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    evidence_unit_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "evidence_units.id", ondelete="RESTRICT", name="fk_manifest_items_evidence_unit"
+        ),
+        nullable=False,
+    )
+    evidence_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "evidence_revisions.id",
+            ondelete="RESTRICT",
+            name="fk_manifest_items_evidence_revision",
+        ),
+        nullable=False,
+    )
+    source_id: Mapped[UUID] = mapped_column(
+        ForeignKey("sources.id", ondelete="RESTRICT", name="fk_manifest_items_source"),
+        nullable=False,
+    )
+    source_revision_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "source_revisions.id",
+            ondelete="RESTRICT",
+            name="fk_manifest_items_source_revision",
+        ),
+        nullable=False,
+    )
+    evidence_review_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            "evidence_reviews.id",
+            ondelete="RESTRICT",
+            name="fk_manifest_items_evidence_review",
+        ),
+        nullable=False,
+    )
+    evidence_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    context_url: Mapped[str] = mapped_column(Text, nullable=False)
+    source_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    evidence_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    review_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    lexical_score: Mapped[float] = mapped_column(Float, nullable=False)
+    vector_score: Mapped[float] = mapped_column(Float, nullable=False)
+    hybrid_score: Mapped[float] = mapped_column(Float, nullable=False)
+    lexical_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+    vector_rank: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    context_manifest: Mapped[ContextManifest] = relationship(back_populates="items")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "context_manifest_id", "ordinal", name="uq_context_manifest_items_manifest_ordinal"
+        ),
+        UniqueConstraint(
+            "context_manifest_id",
+            "evidence_revision_id",
+            name="uq_context_manifest_items_manifest_evidence_revision",
+        ),
+        CheckConstraint("ordinal > 0", name="positive_ordinal"),
+        CheckConstraint("lexical_score >= 0", name="nonnegative_lexical_score"),
+        CheckConstraint("vector_score >= -1 AND vector_score <= 1", name="vector_score_range"),
+        CheckConstraint("hybrid_score >= 0", name="nonnegative_hybrid_score"),
+        CheckConstraint("lexical_rank > 0 AND vector_rank > 0", name="positive_ranks"),
+        CheckConstraint("length(evidence_content_hash) = 64", name="evidence_hash_sha256"),
+        CheckConstraint("length(source_content_hash) = 64", name="source_hash_sha256"),
+        Index("ix_context_manifest_items_manifest", "context_manifest_id", "ordinal"),
+    )
+
+
+IMMUTABLE_MODELS = (
+    SourceRevision,
+    Segment,
+    EvidenceRevision,
+    EvidenceReview,
+    ClaimRevision,
+    ClaimEvidenceEdge,
+    ClaimReview,
+    OpportunityDraft,
+    ContextManifest,
+    ContextManifestItem,
+)
 
 
 def _reject_immutable_update(_mapper: object, _connection: object, target: object) -> None:
